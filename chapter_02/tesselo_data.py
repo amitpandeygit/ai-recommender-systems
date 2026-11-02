@@ -318,12 +318,15 @@ def simulate(cfg=Config()):
     return users, items, served, events
 
 
-def corrected_time(events):
-    """Action time on the server's clock: receipt time minus the phone's own delay.
+def estimated_action_time(events):
+    """An estimate of action time on the server's clock: receipt time minus the
+    time the event waited on the phone.
 
     The phone reports when it sent the batch (client_send_time) and when each
-    action happened (client_time), both on its own clock. The difference is the
-    delay; it is correct even when the phone's clock is wrong.
+    action happened (client_time), both on its own clock. Their difference is the
+    wait. A fixed clock offset cancels out. A clock that runs fast or slow, or is
+    reset in between, does not, and the upload's travel time remains in the
+    estimate. Use seq, not this estimate, to order events on one phone.
     """
     return events["server_time"] - (events["client_send_time"] - events["client_time"])
 
@@ -379,7 +382,7 @@ def report(cfg, items, served, events):
 
     late = e["server_time"] - e["_event_time"] > 3_600
     print(f"\nEvents that reached the server more than an hour after the action: {late.mean():.1%}")
-    ct = corrected_time(e)
+    ct = estimated_action_time(e)
     # Neighbouring actions on one phone, in true order (the second strictly later)
     o = np.lexsort((e["_event_time"], e["device_id"]))
     same = (e["device_id"][o][1:] == e["device_id"][o][:-1]) & (np.diff(e["_event_time"][o]) > 0)

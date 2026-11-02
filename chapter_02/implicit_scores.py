@@ -2,10 +2,11 @@
 
 Two jobs, kept apart:
 
-1. prepare(): turn raw logs into eligible training events. Remove duplicates,
-   keep only events that had reached the server by the training cutoff (before
-   deriving anything from them), estimate action times, link identities with a
-   careful same-visit rule, and check consent at the time and now. The generator
+1. prepare(): turn raw logs into eligible training events. Keep only events
+   that had reached the server by the training cutoff (before deriving anything
+   from them), remove duplicates keeping the earliest copy, estimate action
+   times, link identities with a careful same-visit rule, keep the 30-day
+   window, and check consent at the time and now. The generator
    already supplies impression IDs and sequence numbers; joining actions to
    impressions and validating times are covered in Chapter 28.
 2. Score the eligible events in three steps:
@@ -13,8 +14,9 @@ Two jobs, kept apart:
      step 2  time decay     - each event counts half as much every HALF_LIFE_DAYS days
      step 3  rarity weight  - optional; positive scores on items fewer users engage
                               with count more: 1 + ln((1 + N) / (1 + max(n, min(MIN_USERS, N))))
-   "Not interested" also sets a separate block flag. Blocked items are filtered
-   out before any ranking, whatever their score.
+   "Not interested" also sets a block, kept in a separate list with its own
+   90-day expiry. Blocked items are filtered out before any ranking, whatever
+   their score.
 
 Item statistics (N and n) are computed once, from a defined population and
 window, and passed in. The worked example in section 2.5 runs through the same
@@ -30,13 +32,14 @@ Repository: https://github.com/amitpandeygit/ai-recommender-systems (folder chap
 """
 import numpy as np
 
-from tesselo_data import Config, corrected_time, simulate
+from tesselo_data import Config, estimated_action_time, simulate
 
 EVENT_WEIGHTS = {"click": 1, "complete": 3, "like": 4, "add_to_cart": 3,
                  "purchase": 6, "skip": -2, "not_interested": -5}
 UNSCORED = {"viewable", "watch_end", "login"}      # logged on purpose, but not part of the score
 BLOCK_EVENTS = {"not_interested"}
 HALF_LIFE_DAYS = 14.0
+BLOCK_DAYS = 90                                    # "not interested" blocks last 90 days
 MIN_USERS = 5                                      # rarity treats fewer engaged users as 5
 
 
@@ -48,44 +51,61 @@ def check_event_names(event):
 
 
 def link_same_visit(events):
-    """Link logged-out events to a user only if, later in the same visit, exactly one
-    account logged in, from the same app install.
+    """Link a logged-out event to a user only if, in the same visit, exactly one
+    account logged in, and it logged in later than the event (by seq), from the
+    same app install.
 
     This is a careful rule, not proof: it assumes one person used the phone for the
-    whole visit. It is retrospective, so it is used only to build training data. At
-    serving time, before the login, the request was anonymous. Visits with logins
-    from more than one account are left anonymous, and so is everything else.
+    whole visit. Logged-out events after a login (for example after a logout) stay
+    anonymous: a logout starts a new identity boundary. The rule is retrospective,
+    so it is used only to build training data.
     """
     user = events["user_id"].copy()
     login = np.flatnonzero(events["event"] == "login")
-    owners = {}
-    for s, u, a in zip(events["session_id"][login], events["user_id"][login],
-                       events["anonymous_id"][login]):
-        owners.setdefault(s, set()).add((u, a))
-    anon = np.flatnonzero(user < 0)
-    for j in anon:
-        found = owners.get(events["session_id"][j])
-        if found and len(found) == 1:                       # exactly one account logged in
-            u, a = next(iter(found))
-            if a == events["anonymous_id"][j]:              # same app install
-                user[j] = u
+    logins = {}
+    for j in login:
+        logins.setdefault(events["session_id"][j], []).append(
+            (events["user_id"][j], events["anonymous_id"][j], events["seq"][j]))
+    for j in np.flatnonzero(user < 0):
+        found = logins.get(events["session_id"][j])
+        if not found or len({u for u, _, _ in found}) != 1:      # none, or several accounts
+            continue
+        if any(a == events["anonymous_id"][j] and q > events["seq"][j]   # same install, and later
+               for _, a, q in found):
+            user[j] = found[0][0]
     return user
 
 
-def prepare(events, users, cutoff):
-    """Raw logs -> eligible training events (user, item, event, age in days)."""
-    first = np.unique(events["event_id"], return_index=True)[1]          # 1. remove duplicates
-    e = {key: val[first] for key, val in events.items()}
-    arrived = e["server_time"] < cutoff                                  # 2. only what had arrived
-    e = {key: val[arrived] for key, val in e.items()}                    #    by the cutoff, before
-    check_event_names(e["event"])                                        #    anything is derived
-    t = corrected_time(e)                                                # 3. estimated action time
+def prepare(events, users, cutoff, window_days=30):
+    """Raw logs -> eligible training events (user, item, event, age in days).
+
+    Works whatever the order of the input rows.
+    """
+    arrived = events["server_time"] < cutoff                             # 1. only what had arrived
+    e = {key: val[arrived] for key, val in events.items()}               #    by the cutoff
+    order = np.lexsort((e["server_time"], e["event_id"]))               # 2. remove duplicates,
+    first = order[np.unique(e["event_id"][order], return_index=True)[1]]  #   keeping the earliest copy
+    e = {key: val[first] for key, val in e.items()}
+    check_event_names(e["event"])
+    t = estimated_action_time(e)                                         # 3. estimated action time
     user = link_same_visit(e)                                            # 4. identity
-    keep = ((t < cutoff) & (user >= 0) & (e["item_id"] >= 0)
-            & e["consent_at_time"]                                       # 5. consent then...
+    keep = ((t < cutoff) & (t >= cutoff - window_days * 86_400)          # 5. inside the window
+            & (user >= 0) & (e["item_id"] >= 0)
+            & e["consent_at_time"]                                       # 6. consent then...
             & users["current_consent"][np.maximum(user, 0)])             #    ...and now
     return {"user": user[keep], "item": e["item_id"][keep], "event": e["event"][keep],
             "age_days": (cutoff - t[keep]) / 86_400}
+
+
+def active_blocks(events, users, cutoff, block_days=BLOCK_DAYS):
+    """(user, item) pairs blocked by "not interested" in the last block_days days.
+
+    Kept apart from the scores, with their own expiry, so that rebuilding scores
+    from a moving 30-day window cannot quietly unblock an item.
+    """
+    d = prepare(events, users, cutoff, window_days=block_days)
+    hit = np.isin(d["event"], list(BLOCK_EVENTS))
+    return set(zip(d["user"][hit].tolist(), d["item"][hit].tolist()))
 
 
 def pair_sums(user_idx, item_idx, event, age_days):
@@ -183,6 +203,8 @@ if __name__ == "__main__":
     u_keys, u_idx = np.unique(data["user"], return_inverse=True)   # dense indices for any ID type
     i_keys, i_idx = np.unique(data["item"], return_inverse=True)
     pairs, raw, blocked = pair_sums(u_idx, i_idx, data["event"], data["age_days"])
+    blocks = active_blocks(events, users, cutoff)                 # separate list, 90-day expiry
+    blocked |= np.array([(u_keys[a], i_keys[b]) in blocks for a, b in pairs])
     n_users = len(u_keys)                                       # the scoring population
     engaged = np.bincount(pairs[(raw > 0) & ~blocked, 1], minlength=len(i_keys))
     rarity = rarity_weights(engaged, n_users)
