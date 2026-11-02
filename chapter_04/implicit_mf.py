@@ -154,7 +154,8 @@ def fold_in(Y, YtY, items_used, weights, reg, alpha):
     """A vector for a new or changed user, with item vectors fixed: one iALS row solve.
     YtY = Y.T @ Y is computed once per item-model version and reused for every user,
     so the work depends on the user's few items, not on the size of the catalogue.
-    No items: a zero vector, which scores nothing, so the fallback chain takes over."""
+    No items: returns a zero vector. The caller must mark the personal scores as
+    unavailable (NO) to activate the fallback chain."""
     idx = np.asarray(items_used, dtype=np.int64)
     if len(idx) == 0:
         return np.zeros(Y.shape[1])
