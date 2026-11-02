@@ -1,0 +1,2 @@
+# Exact versions used to produce the printed output in the book
+numpy==2.5.4

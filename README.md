@@ -12,10 +12,16 @@ source .venv/bin/activate        # on Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+To reproduce the book's printed output exactly, install the tested versions instead:
+
+```bash
+pip install -r requirements.txt -c constraints.txt
+```
+
 ## Chapters
 
 | Folder | Chapter | Run |
 | --- | --- | --- |
 | `chapter_01` | The Anatomy of a Modern Recommender: the five-stage funnel in miniature | `python chapter_01/listing_1_1_funnel.py` |
 
-Tested with Python 3.13 and 3.14 and NumPy 2.5. Other versions may print a different final slate.
+Tested with Python 3.13 and 3.14 and NumPy 2.5.4 (pinned in `constraints.txt`). Other versions may print a different final slate.
