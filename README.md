@@ -26,5 +26,6 @@ pip install -r requirements.txt -c constraints.txt
 | --- | --- | --- |
 | `chapter_01` | The Anatomy of a Modern Recommender: the five-stage funnel in miniature | `python chapter_01/listing_1_1_funnel.py` |
 | `chapter_02` | Data, Feedback and User Signals: the Tesselo data generator with planted biases (Listing 2.3), and from raw logs to implicit scores (Listings 2.1 and 2.2) | `python chapter_02/tesselo_data.py`<br>`python chapter_02/implicit_scores.py` |
+| `chapter_03` | Implementing a Simple Recommender: shop orders and item attributes for Tesselo, charts, trending and "bought together" rules (Listings 3.1 and 3.2), similarity, content-based filtering, item-based collaborative filtering, k-means segments and a time-split test (Listings 3.3 to 3.7) | `python chapter_03/tesselo_shop.py`<br>`python chapter_03/popular_and_together.py`<br>`python chapter_03/similarity_recs.py` |
 
 Tested with Python 3.13 and 3.14 and NumPy 2.5.4 (pinned in `constraints.txt`). Other versions may print a different final slate.
