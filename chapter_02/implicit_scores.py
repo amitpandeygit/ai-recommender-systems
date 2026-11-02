@@ -1,14 +1,25 @@
-"""Listing 2.2 - Turning logged behaviour into implicit scores (Tesselo, Chapter 2).
+"""Listings 2.1 and 2.2 - From raw logs to implicit scores (Tesselo, Chapter 2).
 
-Three steps, applied in this order:
-  1. event weights  - a purchase says more than a click; "not interested" is negative
-  2. time decay     - each event counts half as much every HALF_LIFE_DAYS days
-  3. rarity weight  - positive scores on items few people engage with count more
-                      (the IDF idea from text search: weight = ln(N_users / users_engaged))
+Two jobs, kept apart:
 
-The first part reproduces the worked example in section 2.5 step by step.
-The second part applies the same function to the logs from tesselo_data.py, after
-stitching logged-out visits to their user through the device ID.
+1. prepare(): turn raw logs into eligible training events. Remove duplicates,
+   fix event times, link identities only where the log proves it (a login in
+   the same visit), check consent at the time and now, and keep only events
+   that had arrived before the training cutoff.
+2. Score the eligible events in three steps:
+     step 1  event weights  - a purchase says more than a click
+     step 2  time decay     - each event counts half as much every HALF_LIFE_DAYS days
+     step 3  rarity weight  - optional; positive scores on items fewer users engage
+                              with count more: 1 + ln((1 + N) / (1 + max(n, MIN_USERS)))
+   "Not interested" also sets a separate block flag. Blocked items are filtered
+   out before any ranking, whatever their score.
+
+Item statistics (N and n) are computed once, from a defined population and
+window, and passed in. The worked example in section 2.5 runs through the same
+functions.
+
+This is a laptop-scale, in-memory implementation for teaching. Chapter 28 shows
+how the same steps run on a data platform.
 
 Needs Python 3.12 or later. Tested with Python 3.13 and 3.14, NumPy 2.5.4. Run from the repository root:
     pip install -r requirements.txt -c constraints.txt
@@ -17,89 +28,149 @@ Repository: https://github.com/amitpandeygit/ai-recommender-systems (folder chap
 """
 import numpy as np
 
-from tesselo_data import Config, simulate
+from tesselo_data import Config, corrected_time, simulate
 
 EVENT_WEIGHTS = {"click": 1, "complete": 3, "like": 4, "add_to_cart": 3,
-                 "purchase": 6, "skip": -2, "not_interested": -5}   # watch_seconds: not scored
+                 "purchase": 6, "skip": -2, "not_interested": -5}
+UNSCORED = {"viewable", "watch_end", "login"}      # logged on purpose, but not part of the score
+BLOCK_EVENTS = {"not_interested"}
 HALF_LIFE_DAYS = 14.0
+MIN_USERS = 5                                      # rarity treats fewer engaged users as 5
 
 
-def implicit_scores(user, item, event, age_days, n_users):
-    """Return (pairs, scores): one score per distinct (user, item) pair."""
-    if len(event) == 0:
-        return np.empty((0, 2), dtype=np.int64), np.empty(0)
-    weight = np.array([EVENT_WEIGHTS.get(e, 0) for e in event], dtype=float)
-    decayed = weight * 0.5 ** (age_days / HALF_LIFE_DAYS)            # step 2: time decay
-    pairs, inverse = np.unique(np.stack([user, item], axis=1), axis=0, return_inverse=True)
-    raw = np.bincount(inverse.ravel(), weights=decayed)               # step 1: sum per pair
-    positive = raw > 0
-    users_engaged = np.bincount(pairs[positive, 1], minlength=item.max() + 1)
-    rarity = np.log(n_users / np.maximum(users_engaged[pairs[:, 1]], 1))
-    scores = np.where(positive, raw * rarity, raw)                    # step 3: positives only
-    return pairs, scores
+def check_event_names(event):
+    """Refuse unknown event names instead of silently scoring them as zero."""
+    unknown = set(np.unique(event)) - EVENT_WEIGHTS.keys() - UNSCORED
+    if unknown:
+        raise ValueError(f"Unknown event names: {sorted(unknown)}")
+
+
+def link_same_visit(events):
+    """Link logged-out events to a user only if that user logged in later in the same visit.
+
+    This is retrospective: it is used to build training data. At serving time,
+    before the login, the request was anonymous. Everything else stays anonymous.
+    """
+    user = events["user_id"].copy()
+    login = events["event"] == "login"
+    visit_owner = dict(zip(events["session_id"][login], events["user_id"][login]))
+    anon = np.flatnonzero(user < 0)
+    user[anon] = [visit_owner.get(s, -1) for s in events["session_id"][anon]]
+    return user
+
+
+def prepare(events, users, cutoff):
+    """Raw logs -> eligible training events (user, item, event, age in days)."""
+    first = np.unique(events["event_id"], return_index=True)[1]          # 1. remove duplicates
+    e = {key: val[first] for key, val in events.items()}
+    check_event_names(e["event"])
+    t = corrected_time(e)                                                # 2. action time
+    user = link_same_visit(e)                                            # 3. identity
+    keep = ((e["server_time"] < cutoff) & (t < cutoff)                   # 4. arrived before cutoff
+            & (user >= 0) & (e["item_id"] >= 0)
+            & e["consent_at_time"]                                       # 5. consent then...
+            & users["current_consent"][np.maximum(user, 0)])             #    ...and now
+    return {"user": user[keep], "item": e["item_id"][keep], "event": e["event"][keep],
+            "age_days": (cutoff - t[keep]) / 86_400}
+
+
+def pair_sums(user_idx, item_idx, event, age_days):
+    """Steps 1 and 2: one decayed sum, and one block flag, per (user, item) pair."""
+    weight = np.array([EVENT_WEIGHTS.get(e, 0) for e in event], dtype=float)   # UNSCORED -> 0
+    decayed = weight * 0.5 ** (age_days / HALF_LIFE_DAYS)
+    pairs, inverse = np.unique(np.stack([user_idx, item_idx], axis=1), axis=0, return_inverse=True)
+    raw = np.bincount(inverse.ravel(), weights=decayed, minlength=len(pairs))
+    is_block = np.isin(event, list(BLOCK_EVENTS)).astype(float)
+    blocked = np.bincount(inverse.ravel(), weights=is_block, minlength=len(pairs)) > 0
+    return pairs, raw, blocked
+
+
+def rarity_weights(users_engaged, n_users):
+    """Step 3: smoothed rarity per item, from population statistics passed in."""
+    return 1.0 + np.log((1 + n_users) / (1 + np.maximum(users_engaged, MIN_USERS)))
+
+
+def implicit_scores(pairs, raw, rarity=None):
+    """Final score per pair. rarity=None turns step 3 off."""
+    if rarity is None:
+        return raw
+    return np.where(raw > 0, raw * rarity[pairs[:, 1]], raw)
 
 
 def worked_example():
-    """Section 2.5: Maya's four items, with every intermediate number printed."""
-    n_users = 100_000
-    rows = [  # (item, event, age in days)
-        ("A cooking video", "click", 2), ("A cooking video", "complete", 2), ("A cooking video", "like", 2),
-        ("B phone case", "click", 20), ("B phone case", "add_to_cart", 20), ("B phone case", "purchase", 20),
-        ("C clickbait video", "click", 1), ("C clickbait video", "skip", 1),
-        ("D song video", "not_interested", 5),
-    ]
-    engaged = {"A cooking video": 500, "B phone case": 20_000,
-               "C clickbait video": 8_000, "D song video": 2_000}
-    print("Item               raw  age  decay   decayed  users  rarity   score")
-    for name in engaged:
-        evs = [(e, age) for n, e, age in rows if n == name]
-        raw = sum(EVENT_WEIGHTS[e] for e, _ in evs)
-        age = evs[0][1]
-        decay = 0.5 ** (age / HALF_LIFE_DAYS)
-        rarity = np.log(n_users / engaged[name])
-        score = raw * decay * rarity if raw > 0 else raw * decay
-        print(f"{name:<17} {raw:>4} {age:>4}  {decay:.4f} {raw * decay:>8.3f} {engaged[name]:>6}"
-              f"  {rarity:>6.4f} {score:>7.2f}")
+    """Section 2.5: Maya's four items, run through the same functions."""
+    names = ["A cooking video", "B phone case", "C clickbait video", "D song video"]
+    rows = [(0, "click", 2), (0, "complete", 2), (0, "like", 2),
+            (1, "click", 20), (1, "add_to_cart", 20), (1, "purchase", 20),
+            (2, "click", 1), (2, "skip", 1),
+            (3, "not_interested", 5)]
+    item = np.array([r[0] for r in rows])
+    event = np.array([r[1] for r in rows], dtype=object)
+    age = np.array([r[2] for r in rows], dtype=float)
+    check_event_names(event)
+    pairs, raw, blocked = pair_sums(np.zeros(len(rows), dtype=int), item, event, age)
+    engaged, n_users = np.array([500, 20_000, 8_000, 2_000]), 100_000   # population statistics
+    rarity = rarity_weights(engaged, n_users)
+    score = implicit_scores(pairs, raw, rarity)
+    print("Item               decayed sum  users  rarity    score  blocked")
+    for p, r, b, s in zip(pairs, raw, blocked, score):
+        print(f"{names[p[1]]:<18} {r:>11.3f} {engaged[p[1]]:>6}  {rarity[p[1]]:.4f} {s:>8.2f}  {b}")
 
 
-def stitch(events):
-    """Give logged-out events the user ID last seen on the same device."""
-    user = events["user_id"].copy()
-    known = user >= 0
-    device_owner = dict(zip(events["device_id"][known], user[known]))
-    missing = np.flatnonzero(~known)
-    user[missing] = [device_owner.get(d, -1) for d in events["device_id"][missing]]
-    return user
+def clickbait_share_in_top10(pairs, score, blocked, clickbait):
+    """Rerank each user's already-used items; skip blocked items and scores <= 0."""
+    ok = ~blocked & (score > 0)
+    p, s = pairs[ok], score[ok]
+    order = np.lexsort((-s, p[:, 0]))                       # by user, then best score first
+    p = p[order]
+    start = np.r_[0, np.flatnonzero(np.diff(p[:, 0])) + 1]
+    rank = np.arange(len(p)) - np.repeat(start, np.diff(np.r_[start, len(p)]))
+    top = p[rank < 10]
+    n = np.bincount(top[:, 0])
+    has = n > 0
+    return (np.bincount(top[:, 0], weights=clickbait[top[:, 1]] > 0)[has] / n[has]).mean()
 
 
 if __name__ == "__main__":
     worked_example()
 
     cfg = Config()
-    users, items, imp, events = simulate(cfg)
-    user = stitch(events)
-    print(f"\nEvents without a user ID: {(events['user_id'] < 0).mean():.1%} before stitching, "
-          f"{(user < 0).mean():.1%} after")
+    users, items, served, events = simulate(cfg)
+    cutoff = cfg.days * 86_400                                # train at the end of day 30
 
-    keep = (user >= 0) & users["consent"][np.maximum(user, 0)]    # no profiling without consent
-    print(f"Events dropped because the user turned personalisation off: "
-          f"{((user >= 0) & ~keep).mean():.1%}")
-    now_s = events["time_s"].max()
-    age_days = (now_s - events["time_s"][keep]) / 86_400
-    pairs, scores = implicit_scores(user[keep], events["item_id"][keep],
-                                    events["event"][keep], age_days, cfg.num_users)
+    # Identity: same-visit linking versus "last user seen on this phone"
+    first = np.unique(events["event_id"], return_index=True)[1]
+    e = {key: val[first] for key, val in events.items()}
+    anon = e["user_id"] < 0
+    safe = link_same_visit(e)
+    known = e["user_id"] >= 0
+    last_user = dict(zip(e["device_id"][known], e["user_id"][known]))   # whole month, incl. the future
+    naive = np.array([last_user.get(d, -1) for d in e["device_id"]])
+    for label, linked in (("same-visit login", safe), ("last user on phone", naive)):
+        got = anon & (linked >= 0)
+        wrong = got & (linked != e["_true_user"])
+        print(f"\nLogged-out events linked by {label:<19}: {got.sum() / anon.sum():.1%}, "
+              f"wrongly linked: {wrong.sum() / max(got.sum(), 1):.1%}", end="")
+    print()
 
-    # Compare each user's top 10 by click count with their top 10 by implicit score
-    clicks = events["event"][keep] == "click"
-    cpairs, ccount = np.unique(np.stack([user[keep][clicks], events["item_id"][keep][clicks]], axis=1),
-                               axis=0, return_counts=True)
-    def bait_share(p, s):
-        share = []
-        for u in np.unique(p[:, 0]):
-            rows = np.flatnonzero(p[:, 0] == u)
-            top = p[rows[np.argsort(-s[rows], kind="stable")[:10]], 1]
-            share.append((items["clickbait"][top] > 0).mean())
-        return np.mean(share)
-    print(f"Clickbait share of each user's top 10: {bait_share(cpairs, ccount):.1%} by clicks, "
-          f"{bait_share(pairs, scores):.1%} by implicit score "
-          f"(catalogue share {np.mean(items['clickbait'] > 0):.1%})")
+    # Training data at the cutoff
+    data = prepare(events, users, cutoff)
+    print(f"Eligible training events: {len(data['event']):,}")
+    u_keys, u_idx = np.unique(data["user"], return_inverse=True)   # dense indices for any ID type
+    i_keys, i_idx = np.unique(data["item"], return_inverse=True)
+    pairs, raw, blocked = pair_sums(u_idx, i_idx, data["event"], data["age_days"])
+    n_users = len(u_keys)                                       # the scoring population
+    engaged = np.bincount(pairs[raw > 0, 1], minlength=len(i_keys))
+    rarity = rarity_weights(engaged, n_users)
+    print(f"Scoring population: {n_users:,} users with eligible events; "
+          f"blocked (user, item) pairs: {blocked.sum():,}")
+
+    _, inverse = np.unique(np.stack([u_idx, i_idx], axis=1), axis=0, return_inverse=True)
+    clicks = np.bincount(inverse.ravel(), weights=data["event"] == "click", minlength=len(pairs))
+    bait = items["clickbait"][i_keys]
+    print(f"Clickbait share of each user's top 10 already-used items "
+          f"(catalogue share {np.mean(items['clickbait'] > 0):.1%}):")
+    for label, s in (("ranked by clicks", clicks),
+                     ("implicit score, no rarity", implicit_scores(pairs, raw)),
+                     ("implicit score, with rarity", implicit_scores(pairs, raw, rarity))):
+        print(f"  {label:<28} {clickbait_share_in_top10(pairs, s, blocked, bait):.1%}")
