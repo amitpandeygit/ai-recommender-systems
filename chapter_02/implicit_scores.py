@@ -52,13 +52,14 @@ def check_event_names(event):
 
 def link_same_visit(events):
     """Link a logged-out event to a user only if, in the same visit, exactly one
-    account logged in, and it logged in later than the event (by seq), from the
-    same app install.
+    account logged in, it logged in later than the event (by seq), from the same
+    app install, and no login on that install came before the event.
 
     This is a careful rule, not proof: it assumes one person used the phone for the
     whole visit. Logged-out events after a login (for example after a logout) stay
-    anonymous: a logout starts a new identity boundary. The rule is retrospective,
-    so it is used only to build training data.
+    anonymous, even if the same account logs in again: a logout starts a new
+    identity boundary. The rule is retrospective, so it is used only to build
+    training data.
     """
     user = events["user_id"].copy()
     login = np.flatnonzero(events["event"] == "login")
@@ -70,8 +71,10 @@ def link_same_visit(events):
         found = logins.get(events["session_id"][j])
         if not found or len({u for u, _, _ in found}) != 1:      # none, or several accounts
             continue
-        if any(a == events["anonymous_id"][j] and q > events["seq"][j]   # same install, and later
-               for _, a, q in found):
+        here = [q for _, a, q in found if a == events["anonymous_id"][j]]   # same install only
+        if any(q < events["seq"][j] for q in here):         # an earlier login: after a logout,
+            continue                                        # so a new identity boundary
+        if any(q > events["seq"][j] for q in here):         # a later login
             user[j] = found[0][0]
     return user
 
