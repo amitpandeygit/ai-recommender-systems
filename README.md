@@ -6,6 +6,8 @@ The running example throughout the book is **Tesselo**, a fictional global platf
 
 ## Setup
 
+You need Python 3.12 or later, because NumPy 2.5.4 (the tested version) does not support older versions of Python.
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate        # on Windows: .venv\Scripts\activate

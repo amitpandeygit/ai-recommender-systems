@@ -3,7 +3,7 @@
 Every model here is a toy. Embeddings are random and the scores are hand-written formulas,
 so the numbers show the mechanics of the funnel, not real relevance or real probabilities.
 
-Tested with Python 3.13 and 3.14, NumPy 2.5.4. Run from the repository root:
+Needs Python 3.12 or later. Tested with Python 3.13 and 3.14, NumPy 2.5.4. Run from the repository root:
     pip install -r requirements.txt -c constraints.txt
     python chapter_01/listing_1_1_funnel.py
 Repository: https://github.com/amitpandeygit/ai-recommender-systems (folder chapter_01)
