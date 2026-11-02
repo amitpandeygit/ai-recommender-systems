@@ -2,11 +2,13 @@
 
 Section 3.2: top charts per language, a damped mean for few ratings, and
 trending with smoothing.
-Section 3.3: support, confidence and lift on baskets, a significance score,
-and the heavy-buyer correction Amazon described in 2017.
+Section 3.3: support, confidence and lift on baskets, a residual score used to
+rank pairs, and the heavy-buyer correction Amazon described in 2017.
 
 Everything that learns from behaviour uses only data the user allowed for
-personalisation, both at the time and now (Chapter 2's consent rule).
+personalisation, both at the time and now (Chapter 2's consent rule). Nothing is
+shown unless at least MIN_BUYERS distinct users stand behind it. That lowers the
+risk of revealing one person's behaviour; it does not make the data anonymous.
 
 Needs Python 3.12 or later. Run from the repository root:
     python chapter_03/popular_and_together.py
@@ -14,9 +16,9 @@ Needs Python 3.12 or later. Run from the repository root:
 import numpy as np
 
 from tesselo_shop import CATEGORIES, DAY, LANGUAGES, Config, build
-from implicit_scores import pair_sums, prepare
+from implicit_scores import active_blocks, pair_sums, prepare
 
-MIN_BUYERS = 5            # never publish a chart entry or a pair seen with fewer buyers
+MIN_BUYERS = 5            # never show a chart entry or a pair with fewer distinct users
 
 
 # ---------------------------------------------------------------- section 3.2
@@ -26,33 +28,43 @@ def damped_mean(total, count, prior_mean, prior_weight):
     return (total + prior_weight * prior_mean) / (count + prior_weight)
 
 
-def engaged_users(data, n_items):
-    """Per item: users whose decayed implicit score (Chapter 2) is positive."""
-    pairs, raw, _ = pair_sums(data["user"], data["item"], data["event"], data["age_days"])
-    good = pairs[raw > 0]
+def engaged_users(data, blocks, n_items):
+    """Per item: users whose decayed implicit score (Chapter 2) is positive and
+    who have no active "not interested" block on it (90-day blocks, Chapter 2)."""
+    pairs, raw, blocked = pair_sums(data["user"], data["item"], data["event"], data["age_days"])
+    blocked |= np.array([(int(u), int(i)) in blocks for u, i in pairs], dtype=bool)
+    good = pairs[(raw > 0) & ~blocked]
     return good, np.bincount(good[:, 1], minlength=n_items)
 
 
 def top_chart(good, group_of_user, n_groups, n_items, k=10):
-    """Top k items per group (for example, per app language) by engaged users."""
+    """Up to k items per group (for example, per app language), most engaged users
+    first, ties by item id. Items with fewer than MIN_BUYERS users are left out,
+    so a small group can get a short chart, or none."""
     counts = np.zeros((n_groups, n_items), dtype=np.int64)
     np.add.at(counts, (group_of_user[good[:, 0]], good[:, 1]), 1)
-    counts[counts < MIN_BUYERS] = 0                       # small counts are never shown
-    return np.argsort(-counts, axis=1, kind="stable")[:, :k], counts
+    charts = []
+    for g in range(n_groups):
+        order = np.argsort(-counts[g], kind="stable")
+        charts.append(order[counts[g][order] >= MIN_BUYERS][:k])  # suppressed items are dropped
+    return charts, counts
 
 
-def trending(item, time, now, n_items, recent_days=3, base_days=14, prior=5.0):
+def trending(item, user, time, now, n_items, recent_days=3, base_days=14, prior=5.0):
     """Smoothed ratio of recent sales to the sales the item's own baseline predicts.
 
     expected = baseline sales * recent_days / base_days. Adding `prior` to both sides
-    stops an item going from 1 sale to 3 from looking like a 3x trend.
+    stops an item going from 1 sale to 3 from looking like a 3x trend. Items bought
+    by fewer than MIN_BUYERS distinct users in the recent window are not eligible.
     """
     recent = (time >= now - recent_days * DAY) & (time < now)
     base = (time >= now - (recent_days + base_days) * DAY) & ~recent & (time < now)
     r = np.bincount(item[recent], minlength=n_items).astype(float)
     b = np.bincount(item[base], minlength=n_items).astype(float)
     expected = b * recent_days / base_days
-    return (r + prior) / (expected + prior), r, expected
+    buyers = np.unique(np.stack([item[recent], user[recent]], axis=1), axis=0)[:, 0]
+    eligible = np.bincount(buyers, minlength=n_items) >= MIN_BUYERS
+    return (r + prior) / (expected + prior), r, expected, eligible
 
 
 # ---------------------------------------------------------------- section 3.3
@@ -65,8 +77,8 @@ def basket_matrix(order_id, item, n_items):
 
 
 def pair_statistics(x):
-    """Support, confidence and lift for every ordered pair (A -> B), plus a
-    significance score. x is baskets x items (0/1)."""
+    """Support, confidence and lift for every ordered pair (A -> B), plus a residual
+    score used to rank pairs. x is baskets x items (0/1)."""
     n = x.shape[0]
     n_a = x.sum(axis=0)                                   # baskets with A
     n_ab = x.T @ x                                        # baskets with both A and B
@@ -76,11 +88,27 @@ def pair_statistics(x):
         confidence = n_ab / n_a[:, None]                  # P(B | A); row A, column B
         expected = np.outer(n_a, n_a) / n                 # baskets with both if independent
         lift = n_ab / expected
-        score = (n_ab - expected) / np.sqrt(expected)     # how many standard errors above chance
+        score = (n_ab - expected) / np.sqrt(expected)     # residual: a ranking heuristic, not a test
     for m in (confidence, lift, score):
         m[~np.isfinite(m)] = 0.0
     return {"n_a": n_a, "n_ab": n_ab, "support": support, "confidence": confidence,
             "lift": lift, "score": score, "expected": expected}
+
+
+def pair_buyers(order_id, user, item, n_items):
+    """Distinct users who bought A and B in the same basket, for every pair.
+    Five baskets from one heavy buyer count once."""
+    rows = []
+    for o in np.unique(order_id):
+        sel = order_id == o
+        its = np.unique(item[sel])
+        a, b = np.meshgrid(its, its, indexing="ij")
+        keep = a != b
+        rows.append(np.stack([np.full(keep.sum(), user[sel][0]), a[keep], b[keep]], axis=1))
+    trip = np.unique(np.concatenate(rows), axis=0)              # one row per (user, A, B)
+    out = np.zeros((n_items, n_items), dtype=np.int64)
+    np.add.at(out, (trip[:, 1], trip[:, 2]), 1)
+    return out
 
 
 def heavy_buyer_expected(user, item, n_items):
@@ -134,17 +162,20 @@ if __name__ == "__main__":
 
     # Charts per app language from Chapter 2's implicit scores, at the end of day 30
     data = prepare(events, users, now)
-    good, engaged = engaged_users(data, n_items)
+    good, engaged = engaged_users(data, active_blocks(events, users, now), n_items)
     top, counts = top_chart(good, users["language"], len(LANGUAGES), n_items)
-    glob = np.argsort(-engaged, kind="stable")[:10]
+    glob = top_chart(good, np.zeros(cfg.num_users, dtype=np.int64), 1, n_items)[0][0]
     print("\nTop 5 by engaged users, worldwide and in two app languages:")
     print("  worldwide:", [f"{i}({CATEGORIES[items['category'][i]]})" for i in glob[:5]])
     for g in (1, 4):
-        print(f"  {LANGUAGES[g]}:", [f"{i}({CATEGORIES[items['category'][i]]})" for i in top[g, :5]])
-    overlap = np.mean([len(set(top[g]) & set(glob)) for g in range(len(LANGUAGES))])
+        print(f"  {LANGUAGES[g]}:", [f"{i}({CATEGORIES[items['category'][i]]})" for i in top[g][:5]])
+    overlap = np.mean([len(set(top[g].tolist()) & set(glob.tolist())) for g in range(len(LANGUAGES))])
     same_lang = np.mean([(items["language"][top[g]] == g).mean() for g in range(len(LANGUAGES))])
     print(f"  Average overlap of a language's top 10 with the worldwide top 10: {overlap:.1f} items;"
           f" share of a language's top 10 in that language: {same_lang:.0%}")
+    print(f"  Items with at least {MIN_BUYERS} engaged users: worldwide {len(np.flatnonzero(engaged >= MIN_BUYERS)):,};"
+          f" per language {min((counts[g] >= MIN_BUYERS).sum() for g in range(len(LANGUAGES))):,}"
+          f" to {max((counts[g] >= MIN_BUYERS).sum() for g in range(len(LANGUAGES))):,}")
 
     # Consent: only orders placed while personalisation was on, by users who still allow it
     ok = (orders["time"] < users["consent_off_from"][orders["user_id"]]) \
@@ -153,12 +184,14 @@ if __name__ == "__main__":
     print(f"\nOrder lines usable for learning: {ok.sum():,} of {len(ok):,}")
 
     # Trending at the end of day 30
-    tr, r, e = trending(o["item_id"], o["time"], now, n_items)
+    tr, r, e, eligible = trending(o["item_id"], o["user_id"], o["time"], now, n_items)
     raw_ratio = np.where(e > 0, r / np.maximum(e, 1e-9), np.where(r > 0, np.inf, 0))
+    print(f"Items with at least {MIN_BUYERS} recent buyers: {eligible.sum()}")
     for label, s in (("raw ratio (recent / expected)", raw_ratio), ("smoothed, prior 5", tr)):
-        best = np.argsort(-s, kind="stable")[:5]
+        best = np.argsort(-np.where(eligible, s, -np.inf), kind="stable")[:5]
         print(f"Trending by {label}: planted trends in top 5: {np.isin(best, truth['trend']).sum()}; "
-              f"recent sales of the top 5: {r[best].astype(int).tolist()}")
+              f"recent sales of the top 5: {r[best].astype(int).tolist()}, "
+              f"expected {np.round(e[best], 1).tolist()}")
 
     # Frequently bought together, at the basket level
     products = np.flatnonzero(items["is_product"])          # work on products only: smaller matrices
@@ -173,19 +206,23 @@ if __name__ == "__main__":
     print("Share of each anchor's top 2 that are its planted complements, and how often")
     print("the data top-up is in the top 2:")
     for label, m in (("confidence", s["confidence"]), ("lift", s["lift"]),
-                     ("significance score", s["score"])):
+                     ("residual score", s["score"])):
         hit = top_up = 0
         for a in anchors:
             best = np.argsort(-m[a], kind="stable")[:2]
             hit += np.isin(best, comp[a]).sum()
             top_up += t in best
         print(f"  {label:<20} complements {hit / (2 * len(anchors)):.0%}   top-up {top_up / len(anchors):.0%}")
-    shown = (s["score"] >= 3) & (s["n_ab"] >= MIN_BUYERS)     # Tesselo's rule for showing a pair
+    buyers = pair_buyers(o["order_id"], o["user_id"], col[o["item_id"]], len(products))
+    shown = (s["score"] >= 3) & (buyers >= MIN_BUYERS)       # Tesselo's rule for showing a pair
+    by_baskets = (s["score"] >= 3) & (s["n_ab"] >= MIN_BUYERS)
+    print(f"  Pairs that pass with >= {MIN_BUYERS} baskets but fail with >= {MIN_BUYERS} distinct buyers: "
+          f"{(by_baskets & ~shown).sum()}")
     n_shown = [min(shown[a].sum(), 2) for a in anchors]
-    good = sum(np.isin(np.argsort(-np.where(shown[a], s["score"][a], -np.inf))[:k], comp[a]).sum()
-               for a, k in zip(anchors, n_shown))
-    print(f"  With the rule (score >= 3, >= {MIN_BUYERS} baskets): {np.mean(n_shown):.2f} pairs shown per "
-          f"anchor, {good / max(sum(n_shown), 1):.0%} of them planted complements")
+    good = sum(np.isin(np.argsort(-np.where(shown[a], s["score"][a], -np.inf), kind="stable")[:k],
+                       comp[a]).sum() for a, k in zip(anchors, n_shown))
+    print(f"  With the rule (score >= 3, >= {MIN_BUYERS} distinct buyers): {np.mean(n_shown):.2f} pairs "
+          f"shown per anchor, {good / max(sum(n_shown), 1):.0%} of them planted complements")
 
     # Customers who bought X also bought Y: the heavy-buyer correction
     n_obs, naive, corrected = heavy_buyer_expected(o["user_id"], col[o["item_id"]], len(products))
