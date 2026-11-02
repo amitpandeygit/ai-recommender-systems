@@ -41,6 +41,8 @@ def train_mf(u, i, r, n_users, n_items, k=8, lr=0.01, reg=0.05, epochs=30, seed=
         for j in rng.permutation(len(r)):                 # a new random order every epoch
             a, b = u[j], i[j]
             bu[a], bi[b], p[a], q[b], _ = sgd_step(r[j], mu, bu[a], bi[b], p[a], q[b], lr, reg)
+    p[np.bincount(u, minlength=n_users) == 0] = 0.0       # no training ratings: no taste vector,
+    q[np.bincount(i, minlength=n_items) == 0] = 0.0       # so the prediction is mu + the biases
     return mu, bu, bi, p, q
 
 
@@ -100,6 +102,8 @@ if __name__ == "__main__":
     biases = train_mf(u, i, r, nu, ni, k=0, reg=best[2])
     models = {f"biases + {k} factors": train_mf(u, i, r, nu, ni, k=k, reg=0.1) for k in (4, 16)}
     heavy = np.bincount(u, minlength=nu)[tu] >= 20            # test ratings from users with 20+ ratings
+    print(f"  Test ratings from users with no training ratings: {(per_user[tu] == 0).sum():,}; "
+          f"on products with none: {(per_item[ti] == 0).sum():,} (these fall back to mu + biases)")
     print(f"  {'':<22} {'all':>8} {'users with 20+':>15}")
     for name, pred in (("global mean", mean_only), ("biases only", predict(biases, tu, ti)),
                        *((n, predict(m, tu, ti)) for n, m in models.items())):

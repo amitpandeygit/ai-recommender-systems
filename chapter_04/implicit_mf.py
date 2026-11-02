@@ -5,7 +5,7 @@ Section 4.4: iALS (Hu, Koren and Volinsky, 2008), trained by alternating least
              pairs, with uniform or popularity-weighted negative samples.
 Section 4.5: what the embeddings learn, checked against the hidden tastes.
 Section 4.6: "Because you watched" from item vectors.
-Section 4.7: cold start - fold-in for held-out users from their first actions, and item
+Section 4.7: cold start - onboarding fold-in from a held-out user's first videos, and item
              vectors predicted from content for videos with no history.
 Section 4.8: the same honest test as Chapter 3: the "Because you watched" video
              row, a time split, settings chosen on the validation week, Chapter
@@ -28,7 +28,7 @@ from tesselo_shop import CATEGORIES, DAY, LANGUAGES, Config, build  # noqa: E402
 from similarity_recs import (DECIMALS, MIN_BUYERS, NO, content_scores, group_popularity,  # noqa: E402
                              hit_rate, item_features, item_neighbours, lists, mcnemar_exact,
                              test_positives, top_k, user_item_scores, cf_scores)
-from implicit_scores import EVENT_WEIGHTS, active_blocks, prepare  # noqa: E402
+from implicit_scores import EVENT_WEIGHTS, prepare  # noqa: E402
 
 
 # ---------------------------------------------------------------- section 4.4: iALS
@@ -153,16 +153,22 @@ def table_neighbours(sim, item, k=10, allowed=None):
 def fold_in(Y, YtY, items_used, weights, reg, alpha):
     """A vector for a new or changed user, with item vectors fixed: one iALS row solve.
     YtY = Y.T @ Y is computed once per item-model version and reused for every user,
-    so the work depends on the user's few items, not on the size of the catalogue."""
-    return solve_row(Y, YtY, np.asarray(items_used), np.asarray(weights, dtype=float), reg, alpha)
+    so the work depends on the user's few items, not on the size of the catalogue.
+    No items: a zero vector, which scores nothing, so the fallback chain takes over."""
+    idx = np.asarray(items_used, dtype=np.int64)
+    if len(idx) == 0:
+        return np.zeros(Y.shape[1])
+    return solve_row(Y, YtY, idx, np.asarray(weights, dtype=np.float64), reg, alpha)
 
 
 def content_to_factors(feats, Y, known, ridge=1.0):
     """Ridge regression from content features to item vectors, fitted on items
-    with history; returns predicted vectors for every item."""
+    with history. Returns predicted vectors for every item, and the fitted map W:
+    serving a video uploaded later needs W (and the same feature vocabulary), so W
+    belongs to the same model version as Y."""
     F = feats[known]
     W = np.linalg.solve(F.T @ F + ridge * np.eye(F.shape[1]), F.T @ Y[known])
-    return feats @ W
+    return feats @ W, W
 
 
 def worked_example():
@@ -305,15 +311,24 @@ if __name__ == "__main__":
     cat = items["category"]
     print(f"\nUp to 10 neighbours for each of {len(queries):,} eligible videos (eligible videos only, never itself):")
     print(f"  {'neighbours from':<30}{'videos with any':>16}{'mean list length':>18}{'same category':>15}")
+    got = {}
     for name, neigh in (("iALS item vectors (cosine)", lambda i: cosine_neighbours(Y, i, 10, ok)),
                         ("Chapter 3 item-based CF", lambda i: table_neighbours(table, i, 10, ok)),
                         ("hidden vectors (truth)", lambda i: cosine_neighbours(hidden, i, 10, ok))):
-        got = [neigh(i) for i in queries]
-        same = np.concatenate([cat[g] == cat[i] for i, g in zip(queries, got)])
-        print(f"  {name:<30}{np.mean([len(g) > 0 for g in got]):>16.0%}{np.mean([len(g) for g in got]):>18.1f}"
+        g = got[name] = [neigh(i) for i in queries]
+        same = np.concatenate([cat[n] == cat[i] for i, n in zip(queries, g)])
+        print(f"  {name:<30}{np.mean([len(n) > 0 for n in g]):>16.0%}{np.mean([len(n) for n in g]):>18.1f}"
               f"{same.mean():>15.0%}")
     chance = np.mean([(cat[queries] == cat[i]).sum() - 1 for i in queries]) / (len(queries) - 1)
     print(f"  {'random eligible videos':<30}{'':>16}{'':>18}{chance:>15.0%}")
+    covered = [r for r, n in enumerate(got["Chapter 3 item-based CF"]) if len(n) > 0]
+    print(f"  (mean list length is over all {len(queries):,} videos, empty lists included)")
+    for name in got:
+        lists_c = [got[name][r] for r in covered]
+        same = np.concatenate([cat[n] == cat[queries[r]] for r, n in zip(covered, lists_c)])
+        print(f"  on the {len(covered)} videos where CF has links: {name:<28} "
+              f"{sum(len(n) for n in lists_c):>5,} neighbours, mean {np.mean([len(n) for n in lists_c]):.1f}, "
+              f"same category {same.mean():.0%}")
     # dot product (vector length counts) against cosine (direction only) for the user's list
     unit = Y / np.maximum(np.linalg.norm(Y, axis=1, keepdims=True), 1e-12)
     cos_s = eligible_and_scored(X @ unit.T, weight, ok)
@@ -325,47 +340,47 @@ if __name__ == "__main__":
     print(f"  Because you watched video {anchor} ({CATEGORIES[items['category'][anchor]]}): "
           + ", ".join(f"{j} ({CATEGORIES[items['category'][j]]})" for j in cosine_neighbours(Y, anchor, 5, ok)))
 
-    # ---- section 4.7: fold-in for users the item model never saw
-    # Hold out every test user with 5+ items; train item vectors on everyone else.
-    many = rows[history[rows] >= 5]
+    # ---- section 4.7: onboarding - fold-in from a user's first videos, for users the item
+    # model never saw. A first video is one with a positive action (a click, a completion or a
+    # like); each is taken at the moment of that action, using only what was known then.
+    d = prepare(events, users, 23 * DAY)
+    positive = [e for e, w in EVENT_WEIGHTS.items() if w > 0]
+    good = np.isin(d["event"], positive) & video[d["item"]]
+    firsts = {}
+    for t, u, i, e in sorted(zip((-d["age_days"][good]).tolist(), d["user"][good].tolist(),
+                                 d["item"][good].tolist(), d["event"][good].tolist())):
+        f = firsts.setdefault(u, {})
+        if i not in f and len(f) < 5:                         # distinct videos, in time order
+            f[i] = float(np.log1p(EVENT_WEIGHTS[e]))          # the score of that one fresh action
+    onboard = np.array([u for u in rows if len(firsts.get(u, {})) >= 5])
     w_train = weight.copy()
-    w_train[many] = 0.0
+    w_train[onboard] = 0.0                                    # held out of item-model training
     _, Yh = ials(w_train, k, reg, alpha)
     YtY = Yh.T @ Yh                                           # once per item-model version
     ok_h = video & ((w_train > 0).sum(axis=0) >= MIN_BUYERS)  # eligibility from training users only
     lang_h = group_popularity(w_train, users["language"], len(LANGUAGES))[users["language"]]
-    typical = float(np.median(w_train[w_train > 0]))          # weight given to each early action
-    d = prepare(events, users, 23 * DAY)                      # when did each pair start?
-    sc = np.isin(d["event"], list(EVENT_WEIGHTS)) & np.isin(d["user"], many)
-    first = {}
-    for u, i, a in zip(d["user"][sc].tolist(), d["item"][sc].tolist(), d["age_days"][sc].tolist()):
-        first[(u, i)] = max(first.get((u, i), a), a)          # largest age = earliest action
-    order = {u: sorted(np.flatnonzero(weight[u] > 0).tolist(), key=lambda i: (-first[(u, i)], i))
-             for u in many}
-    blocked = {}
-    for bu, bi in active_blocks(events, users, 23 * DAY):
-        blocked.setdefault(bu, []).append(bi)
-    print(f"\nFold-in for {len(many):,} test users with 5+ items, held out of item-model training "
-          f"({(w_train > 0).any(axis=1).sum():,} training users); each early action weighted {typical:.2f}:")
-    print(f"  {'actions known':<34}{'fold-in':>9}{'popular in your language':>26}")
+    print(f"\nOnboarding: {len(onboard):,} test users with 5+ videos with a positive action before day 23, "
+          f"held out of item-model training ({(w_train > 0).any(axis=1).sum():,} training users)")
+    print(f"  {'videos known':<34}{'fold-in':>9}{'popular in your language':>26}")
     for n in (1, 3, 5, None):
-        V = np.zeros((len(many), k))
-        seen = np.zeros((len(many), n_items), dtype=bool)
-        for r, u in enumerate(many):
-            idx = order[u] if n is None else order[u][:n]
-            wts = weight[u, idx] if n is None else np.full(len(idx), typical)
-            V[r] = fold_in(Yh, YtY, idx, wts, reg, alpha)
-            if n is None:
-                seen[r] = used[u]                             # the full history is known
+        V = np.zeros((len(onboard), k))
+        seen = np.zeros((len(onboard), n_items), dtype=bool)
+        for r, u in enumerate(onboard):
+            if n is None:                                     # reference: full history at day 23
+                idx = np.flatnonzero(weight[u] > 0)
+                V[r] = fold_in(Yh, YtY, idx, weight[u, idx], reg, alpha)
+                seen[r] = used[u]
             else:
-                seen[r, idx] = True                           # exclude only what is known,
-                seen[r, blocked.get(u, [])] = True            # plus active blocks
+                idx, wts = list(firsts[u])[:n], list(firsts[u].values())[:n]
+                V[r] = fold_in(Yh, YtY, idx, wts, reg, alpha)
+                seen[r, idx] = True                           # exclude only what is known
+        fold_s = np.where(ok_h[None, :] & V.any(axis=1)[:, None], V @ Yh.T, NO)
         hits = []
-        for top in (top_k(np.where(ok_h[None, :], V @ Yh.T, NO), seen, video), top_k(lang_h[many], seen, video)):
-            hits.append({u for u, t in zip(many.tolist(), top) if pos[u] & set(t.tolist())})
+        for top in (top_k(fold_s, seen, video), top_k(lang_h[onboard], seen, video)):
+            hits.append({u for u, t in zip(onboard.tolist(), top) if pos[u] & set(t.tolist())})
         a_only, b_only = len(hits[0] - hits[1]), len(hits[1] - hits[0])
-        label = "all, with their real weights" if n is None else f"first {n}, in time order"
-        print(f"  {label:<34}{len(hits[0]) / len(many):>9.3f}{len(hits[1]) / len(many):>26.3f}"
+        label = "full history at day 23 (reference)" if n is None else f"first {n}, in time order"
+        print(f"  {label:<34}{len(hits[0]) / len(onboard):>9.3f}{len(hits[1]) / len(onboard):>26.3f}"
               f"   only fold-in {a_only}, only chart {b_only}, McNemar p = {mcnemar_exact(a_only, b_only):.2g}")
 
     # ---- section 4.7: videos with hidden history get vectors from content
@@ -374,7 +389,7 @@ if __name__ == "__main__":
     Xo, Yo = ials(w_old, k, reg, alpha)
     feats = item_features(items, n_items)
     known = ~new & (engaged >= MIN_BUYERS)
-    Yhat = content_to_factors(feats, Yo, known)
+    Yhat, _ = content_to_factors(feats, Yo, known)
     pos_new = {u: s & set(np.flatnonzero(new).tolist()) for u, s in pos.items()}
     pos_new = {u: s for u, s in pos_new.items() if s}
     rn = np.array(sorted(pos_new))
