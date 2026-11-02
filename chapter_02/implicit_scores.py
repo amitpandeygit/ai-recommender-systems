@@ -3,14 +3,16 @@
 Two jobs, kept apart:
 
 1. prepare(): turn raw logs into eligible training events. Remove duplicates,
-   fix event times, link identities only where the log proves it (a login in
-   the same visit), check consent at the time and now, and keep only events
-   that had arrived before the training cutoff.
+   keep only events that had reached the server by the training cutoff (before
+   deriving anything from them), estimate action times, link identities with a
+   careful same-visit rule, and check consent at the time and now. The generator
+   already supplies impression IDs and sequence numbers; joining actions to
+   impressions and validating times are covered in Chapter 28.
 2. Score the eligible events in three steps:
      step 1  event weights  - a purchase says more than a click
      step 2  time decay     - each event counts half as much every HALF_LIFE_DAYS days
      step 3  rarity weight  - optional; positive scores on items fewer users engage
-                              with count more: 1 + ln((1 + N) / (1 + max(n, MIN_USERS)))
+                              with count more: 1 + ln((1 + N) / (1 + max(n, min(MIN_USERS, N))))
    "Not interested" also sets a separate block flag. Blocked items are filtered
    out before any ranking, whatever their score.
 
@@ -46,16 +48,27 @@ def check_event_names(event):
 
 
 def link_same_visit(events):
-    """Link logged-out events to a user only if that user logged in later in the same visit.
+    """Link logged-out events to a user only if, later in the same visit, exactly one
+    account logged in, from the same app install.
 
-    This is retrospective: it is used to build training data. At serving time,
-    before the login, the request was anonymous. Everything else stays anonymous.
+    This is a careful rule, not proof: it assumes one person used the phone for the
+    whole visit. It is retrospective, so it is used only to build training data. At
+    serving time, before the login, the request was anonymous. Visits with logins
+    from more than one account are left anonymous, and so is everything else.
     """
     user = events["user_id"].copy()
-    login = events["event"] == "login"
-    visit_owner = dict(zip(events["session_id"][login], events["user_id"][login]))
+    login = np.flatnonzero(events["event"] == "login")
+    owners = {}
+    for s, u, a in zip(events["session_id"][login], events["user_id"][login],
+                       events["anonymous_id"][login]):
+        owners.setdefault(s, set()).add((u, a))
     anon = np.flatnonzero(user < 0)
-    user[anon] = [visit_owner.get(s, -1) for s in events["session_id"][anon]]
+    for j in anon:
+        found = owners.get(events["session_id"][j])
+        if found and len(found) == 1:                       # exactly one account logged in
+            u, a = next(iter(found))
+            if a == events["anonymous_id"][j]:              # same app install
+                user[j] = u
     return user
 
 
@@ -63,11 +76,12 @@ def prepare(events, users, cutoff):
     """Raw logs -> eligible training events (user, item, event, age in days)."""
     first = np.unique(events["event_id"], return_index=True)[1]          # 1. remove duplicates
     e = {key: val[first] for key, val in events.items()}
-    check_event_names(e["event"])
-    t = corrected_time(e)                                                # 2. action time
-    user = link_same_visit(e)                                            # 3. identity
-    keep = ((e["server_time"] < cutoff) & (t < cutoff)                   # 4. arrived before cutoff
-            & (user >= 0) & (e["item_id"] >= 0)
+    arrived = e["server_time"] < cutoff                                  # 2. only what had arrived
+    e = {key: val[arrived] for key, val in e.items()}                    #    by the cutoff, before
+    check_event_names(e["event"])                                        #    anything is derived
+    t = corrected_time(e)                                                # 3. estimated action time
+    user = link_same_visit(e)                                            # 4. identity
+    keep = ((t < cutoff) & (user >= 0) & (e["item_id"] >= 0)
             & e["consent_at_time"]                                       # 5. consent then...
             & users["current_consent"][np.maximum(user, 0)])             #    ...and now
     return {"user": user[keep], "item": e["item_id"][keep], "event": e["event"][keep],
@@ -86,8 +100,18 @@ def pair_sums(user_idx, item_idx, event, age_days):
 
 
 def rarity_weights(users_engaged, n_users):
-    """Step 3: smoothed rarity per item, from population statistics passed in."""
-    return 1.0 + np.log((1 + n_users) / (1 + np.maximum(users_engaged, MIN_USERS)))
+    """Step 3: smoothed rarity per item, from population statistics passed in.
+
+    users_engaged[i] = number of users in the population whose pair with item i has a
+    positive decayed sum and is not blocked. The weight is always at least 1.
+    """
+    users_engaged = np.asarray(users_engaged)
+    if n_users < 1:
+        raise ValueError("The scoring population is empty")
+    if (users_engaged < 0).any() or (users_engaged > n_users).any():
+        raise ValueError("Each engaged count must be between 0 and the population size")
+    floor = min(MIN_USERS, n_users)                     # the floor can never exceed N
+    return 1.0 + np.log((1 + n_users) / (1 + np.maximum(users_engaged, floor)))
 
 
 def implicit_scores(pairs, raw, rarity=None):
@@ -160,7 +184,7 @@ if __name__ == "__main__":
     i_keys, i_idx = np.unique(data["item"], return_inverse=True)
     pairs, raw, blocked = pair_sums(u_idx, i_idx, data["event"], data["age_days"])
     n_users = len(u_keys)                                       # the scoring population
-    engaged = np.bincount(pairs[raw > 0, 1], minlength=len(i_keys))
+    engaged = np.bincount(pairs[(raw > 0) & ~blocked, 1], minlength=len(i_keys))
     rarity = rarity_weights(engaged, n_users)
     print(f"Scoring population: {n_users:,} users with eligible events; "
           f"blocked (user, item) pairs: {blocked.sum():,}")

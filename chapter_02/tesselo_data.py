@@ -48,7 +48,7 @@ import numpy as np
 
 @dataclass
 class Config:
-    num_users: int = 4_000
+    num_users: int = 8_000
     num_items: int = 5_000
     num_creators: int = 300
     dim: int = 16                    # size of the hidden taste vectors
@@ -65,6 +65,7 @@ class Config:
     product_share: float = 0.30      # the rest of the catalogue is video
     logged_out_share: float = 0.25   # visits that start logged out
     login_midway_share: float = 0.30  # of those, visits where the user logs in partway through
+    handover_share: float = 0.10     # of those on a shared phone, visits where someone else takes over and logs in
     shared_device_share: float = 0.10  # users with no phone of their own, sharing a household phone
     offline_share: float = 0.15      # visits uploaded later, in one batch
     skewed_clock_share: float = 0.03  # phones whose clock is wrong
@@ -110,24 +111,44 @@ def make_world(cfg, rng):
 
 
 def make_requests(cfg, rng, users):
-    """Visits (sessions) and the requests inside them, with login state."""
+    """Visits (sessions) and the requests inside them, in time order, with login state."""
     n_sess = rng.poisson(cfg.sessions_per_user, cfg.num_users)
     s_user = np.repeat(np.arange(cfg.num_users), n_sess)
     s_start = rng.random(len(s_user)) * (cfg.days * 86_400 - 3_600)
     s_nreq = rng.integers(1, cfg.max_requests + 1, len(s_user))
     starts_out = rng.random(len(s_user)) < cfg.logged_out_share
-    login_at = np.full(len(s_user), -1)                 # request index at which the user logs in
+    login_at = np.full(len(s_user), -1)                 # request index at which someone logs in
     midway = starts_out & (s_nreq >= 2) & (rng.random(len(s_user)) < cfg.login_midway_share)
     login_at[midway] = rng.integers(1, s_nreq[midway])  # 1 .. n_req - 1
     login_at[~starts_out] = 0
+
+    # Request times always move forward: each request comes 1 to 4 minutes after the previous one
     r_sess = np.repeat(np.arange(len(s_user)), s_nreq)
     r_idx = np.concatenate([np.arange(k) for k in s_nreq])
-    r_time = s_start[r_sess] + r_idx * rng.uniform(60, 240, len(r_sess))
-    r_user = s_user[r_sess]
-    r_logged = (login_at[r_sess] >= 0) & (r_idx >= login_at[r_sess])
+    first = np.searchsorted(r_sess, r_sess)             # index of each visit's first request
+    gap = np.where(r_idx == 0, 0.0, rng.uniform(60, 240, len(r_sess)))
+    csum = np.cumsum(gap)
+    r_time = s_start[r_sess] + csum - csum[first]
+
+    # Hand-over: on a shared phone, someone else may take the phone and log in
+    login_user = s_user.copy()
+    users_on = {}
+    for u, d in enumerate(users["device"]):
+        users_on.setdefault(d, []).append(u)
+    for s in np.flatnonzero(midway & (rng.random(len(s_user)) < cfg.handover_share)):
+        others = [v for v in users_on[users["device"][s_user[s]]] if v != s_user[s]]
+        if others:
+            login_user[s] = others[rng.integers(0, len(others))]
+    after_login = (login_at[r_sess] >= 0) & (r_idx >= login_at[r_sess])
+    r_user = np.where(after_login, login_user[r_sess], s_user[r_sess])   # who really holds the phone
+    s_first = np.searchsorted(r_sess, np.arange(len(s_user)))
+    t_login = np.full(len(s_user), np.inf)              # never logged in
+    t_login[login_at == 0] = -np.inf                    # logged in from the start
+    t_login[midway] = r_time[s_first[midway] + login_at[midway]] - 5.0
     return {"sess_user": s_user, "sess_start": s_start, "login_at": login_at,
+            "login_user": login_user, "t_login": t_login,
             "req_session": r_sess, "req_index": r_idx, "req_time": r_time,
-            "req_user": r_user, "req_logged_in": r_logged}
+            "req_user": r_user, "req_logged_in": after_login}
 
 
 def choose_slates(cfg, rng, users, items, req_user, req_consent):
@@ -147,15 +168,19 @@ def choose_slates(cfg, rng, users, items, req_user, req_consent):
             _, first = np.unique(ranked[r], return_index=True)
             slates[start + r] = ranked[r][np.sort(first)][:k]
 
-    # Exploration: replace the slot with an item drawn uniformly from the items
-    # not already in this slate (so no slate repeats an item).
+    # Exploration: pick the exploratory slots first. Then draw their items together,
+    # uniformly and without replacement, from the items not in the ranked slate, and
+    # place them in those slots in random order. Every exploratory slot, at every
+    # position, draws from the same pool in the same way.
     explored = rng.random((n_req, k)) < cfg.explore_rate
-    for r, p in zip(*np.nonzero(explored)):
-        while True:
-            pick = rng.integers(0, n_items)
-            if pick not in slates[r]:
-                slates[r, p] = pick
-                break
+    for r in np.flatnonzero(explored.any(axis=1)):
+        slots = np.flatnonzero(explored[r])
+        picks = []
+        while len(picks) < len(slots):
+            pick = int(rng.integers(0, n_items))
+            if pick not in slates[r] and pick not in picks:
+                picks.append(pick)
+        slates[r, rng.permutation(slots)] = picks
     explore_item_prob = np.where(explored, 1.0 / (n_items - k), np.nan)
     return slates, explored, explore_item_prob
 
@@ -205,7 +230,7 @@ def simulate(cfg=Config()):
     served.update({"_viewable": on_screen, "_glimpsed": glimpse, "_looked": looked,
                    "_clicked": clicked})
 
-    # ---- action times, in true behavioural order ----------------------------------
+    # ---- action times, in true behavioural order ------------------------------------
     t_screen = served["served_time"] + (pos - 1) * 2.5
     t_click = t_screen + np.where(glimpse, rng.uniform(0.2, 0.9, len(i)), rng.uniform(1, 6, len(i)))
     is_video = ~items["is_product"][i]
@@ -239,15 +264,20 @@ def simulate(cfg=Config()):
           "session_id": served["session_id"][imp], "item_id": served["item_id"][imp],
           "value": np.concatenate([r[3] for r in rows]),
           "_event_time": np.concatenate([r[2] for r in rows]),
-          "_true_user": true_user[imp], "user_id": served["user_id"][imp],
+          "_true_user": true_user[imp],
           "consent_at_time": served["consent_at_time"][imp]}
 
-    # Login events: a visit that started logged out and logs in partway through
+    # The app attaches the identity that is logged in at the moment of each event
+    sess_ev = ev["session_id"]
+    logged = ev["_event_time"] >= rq["t_login"][sess_ev]
+    ev["user_id"] = np.where(logged, rq["login_user"][sess_ev], -1)
+
+    # Login events: a visit that started logged out and someone logs in partway through
     s_login = np.flatnonzero(rq["login_at"] > 0)
     first_req = np.searchsorted(rq["req_session"], s_login)
     login_req = first_req + rq["login_at"][s_login]
-    t_login = rq["req_time"][login_req] - 5.0
-    lu = rq["sess_user"][s_login]
+    t_login = rq["t_login"][s_login]
+    lu = rq["login_user"][s_login]
     login_ev = {"event": np.full(len(s_login), "login", dtype=object),
                 "impression_id": np.full(len(s_login), -1), "request_id": login_req,
                 "session_id": s_login, "item_id": np.full(len(s_login), -1),
@@ -350,17 +380,30 @@ def report(cfg, items, served, events):
     late = e["server_time"] - e["_event_time"] > 3_600
     print(f"\nEvents that reached the server more than an hour after the action: {late.mean():.1%}")
     ct = corrected_time(e)
-    m_c, m_p = e["event"] == "click", e["event"] == "purchase"
-    imp_c = dict(zip(e["impression_id"][m_c], np.flatnonzero(m_c)))
-    pairs = np.array([(imp_c[i], j) for i, j in zip(e["impression_id"][m_p], np.flatnonzero(m_p))])
+    # Neighbouring actions on one phone, in true order (the second strictly later)
+    o = np.lexsort((e["_event_time"], e["device_id"]))
+    same = (e["device_id"][o][1:] == e["device_id"][o][:-1]) & (np.diff(e["_event_time"][o]) > 0)
+    a, b = o[:-1][same], o[1:][same]
+    print(f"Neighbouring actions on one phone: {len(a):,}. Pairs put in the wrong order or tied:")
     for label, t in (("server time", e["server_time"]), ("client time", e["client_time"]),
-                     ("corrected time", ct)):
-        bad = (t[pairs[:, 1]] <= t[pairs[:, 0]]).sum()
-        print(f"Purchases not after their click, by {label:<14}: {bad} of {len(pairs)}")
+                     ("estimated action time", ct), ("seq", e["seq"])):
+        print(f"  by {label:<22} {(t[b] <= t[a]).sum():>7,}")
     big = np.abs(e["client_time"] - e["_event_time"]) > 600
-    print(f"Events whose phone clock was off by more than 10 minutes: {big.mean():.1%}; "
-          f"largest error after correction: {np.abs(ct - e['_event_time']).max():.2f} s")
+    err = ct - e["_event_time"]
+    print(f"Events whose phone clock was off by more than 10 minutes: {big.mean():.1%}")
+    print(f"Estimated minus true action time: {err.min():.2f} to {err.max():.2f} s "
+          f"(the upload delay this simulation plants)")
 
+    # Chronology checks on the generator itself
+    times, sess_r = served["served_time"][::k], served["session_id"][::k]
+    rev = ((np.diff(times) < 0) & (sess_r[1:] == sess_r[:-1])).sum()
+    sess, t = e["session_id"], e["_event_time"]
+    login = e["event"] == "login"
+    t_login = np.full(sess.max() + 1, -np.inf)
+    t_login[sess[login]] = t[login]
+    early = (e["user_id"] >= 0) & ~login & (t < t_login[sess])
+    print(f"Checks: requests earlier than the one before them in the same visit: {rev}; "
+          f"logged-in events before their visit's login: {early.sum()}")
 
 if __name__ == "__main__":
     cfg = Config()

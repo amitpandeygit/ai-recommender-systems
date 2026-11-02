@@ -25,6 +25,6 @@ pip install -r requirements.txt -c constraints.txt
 | Folder | Chapter | Run |
 | --- | --- | --- |
 | `chapter_01` | The Anatomy of a Modern Recommender: the five-stage funnel in miniature | `python chapter_01/listing_1_1_funnel.py` |
-| `chapter_02` | Data, Feedback and User Signals: the Tesselo data generator with planted biases (Listing 2.1) and implicit scores (Listing 2.2) | `python chapter_02/tesselo_data.py`<br>`python chapter_02/implicit_scores.py` |
+| `chapter_02` | Data, Feedback and User Signals: the Tesselo data generator with planted biases (Listing 2.3), and from raw logs to implicit scores (Listings 2.1 and 2.2) | `python chapter_02/tesselo_data.py`<br>`python chapter_02/implicit_scores.py` |
 
 Tested with Python 3.13 and 3.14 and NumPy 2.5.4 (pinned in `constraints.txt`). Other versions may print a different final slate.
