@@ -188,7 +188,8 @@ if __name__ == "__main__":
     raw_ratio = np.where(e > 0, r / np.maximum(e, 1e-9), np.where(r > 0, np.inf, 0))
     print(f"Items with at least {MIN_BUYERS} recent buyers: {eligible.sum()}")
     for label, s in (("raw ratio (recent / expected)", raw_ratio), ("smoothed, prior 5", tr)):
-        best = np.argsort(-np.where(eligible, s, -np.inf), kind="stable")[:5]
+        cand = np.flatnonzero(eligible)                        # only items that pass the rule
+        best = cand[np.argsort(-s[cand], kind="stable")][:5]   # can be fewer than 5
         print(f"Trending by {label}: planted trends in top 5: {np.isin(best, truth['trend']).sum()}; "
               f"recent sales of the top 5: {r[best].astype(int).tolist()}, "
               f"expected {np.round(e[best], 1).tolist()}")

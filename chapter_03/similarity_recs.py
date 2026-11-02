@@ -20,6 +20,8 @@ matrices). Chapter 6 shows how neighbour search runs at scale.
 Needs Python 3.12 or later. Run from the repository root:
     python chapter_03/similarity_recs.py
 """
+from math import comb
+
 import numpy as np
 
 from tesselo_shop import DAY, LANGUAGES, Config, build, vocabulary
@@ -203,6 +205,8 @@ def group_popularity(weight, group, n_groups):
 def segment_scores(weight, profile, fallback, n_segments, seed=0):
     """Popular in the user's k-means segment; users with no history get the fallback."""
     has = (weight > 0).any(axis=1)
+    if not has.any():
+        return fallback.copy()                               # nobody to cluster: all get the fallback
     centres, seg, _ = kmeans(profile[has], n_segments, np.random.default_rng(seed))
     out = fallback.copy()
     out[np.flatnonzero(has)] = group_popularity(weight[has], seg, len(centres))[seg]
@@ -216,6 +220,35 @@ def top_k(scores, used, eligible_items, k=10):
     s = np.where(used | ~eligible_items[None, :], NO, np.round(scores, DECIMALS))
     best = np.argsort(-s, axis=1, kind="stable")[:, :k]
     return np.where(np.isfinite(np.take_along_axis(s, best, axis=1)), best, -1)
+
+
+def top_k_chain(chain, used, eligible_items, k=10):
+    """A fallback chain: fill each list from the first source, then the next,
+    skipping items already chosen. A later source never outranks an earlier one."""
+    out = np.full((used.shape[0], k), -1)
+    taken = used.copy()
+    for scores in chain:
+        nxt = top_k(scores, taken, eligible_items, k)
+        for r in range(len(out)):
+            free = np.flatnonzero(out[r] < 0)
+            add = nxt[r][nxt[r] >= 0][: len(free)]
+            out[r, free[: len(add)]] = add
+            taken[r, add] = True
+    return out
+
+
+def lists(scores, rows, used, eligible_items, k=10):
+    """Top-k lists for the given rows, from one score matrix or a fallback chain."""
+    if isinstance(scores, tuple):
+        return top_k_chain([s[rows] for s in scores], used[rows], eligible_items, k)
+    return top_k(scores[rows], used[rows], eligible_items, k)
+
+
+def mcnemar_exact(a_only, b_only):
+    """Two-sided exact McNemar test from the discordant counts."""
+    n, m = a_only + b_only, min(a_only, b_only)
+    tail = sum(comb(n, i) for i in range(m + 1)) / 2 ** n
+    return min(1.0, 2 * tail)
 
 
 def hit_rate(top, rows, positives, members=None):
@@ -239,7 +272,7 @@ def recommenders(weight, feats, language, item_language, n_segments, k, strength
             "content, in your language": np.where(has, np.where(content > 0, same + 0.5 * content, NO),
                                                   lang_pop),
             "item-based CF": cf,
-            "CF, then popular in language": np.where(np.isfinite(cf), 1e6 + cf, lang_pop)}
+            "CF, then popular in language": (cf, lang_pop)}     # a chain: CF first, then the fallback
 
 
 if __name__ == "__main__":
@@ -291,10 +324,20 @@ if __name__ == "__main__":
     print(f"Test week (train to day 23, test days 23-30), videos only, hit rate@10")
     print(f"{'':<32}" + "".join(f"{g:>11}" for g in groups) + f"{'full lists':>12}")
     print(f"{'users':<32}" + "".join(f"{len(v):>11,}" for v in groups.values()))
+    tops = {}
     for name, s in scores.items():
-        top = top_k(s[rows], used[rows], video)
+        top = tops[name] = lists(s, rows, used, video)
         print(f"{name:<32}" + "".join(f"{hit_rate(top, rows, pos, v):>11.3f}" for v in groups.values())
               + f"{(top[:, -1] >= 0).mean():>12.0%}")
+
+    # Paired check for users with little history: who got a hit from one method only?
+    short = set(groups["0-4 items"].tolist())
+    hit = {name: {u for u, t in zip(rows.tolist(), tops[name]) if u in short and pos[u] & set(t.tolist())}
+           for name in ("CF, then popular in language", "popular in your language")}
+    a_only = len(hit["CF, then popular in language"] - hit["popular in your language"])
+    b_only = len(hit["popular in your language"] - hit["CF, then popular in language"])
+    print(f"Users with 0-4 items: hit only with CF then language {a_only}, only with language chart "
+          f"{b_only}; exact McNemar p = {mcnemar_exact(a_only, b_only):.3f}")
 
     # "New for you", a history-masking test: hide the history of 10% of videos,
     # as if they had just arrived, and rank only those videos
