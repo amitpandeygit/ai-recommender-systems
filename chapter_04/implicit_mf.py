@@ -5,7 +5,7 @@ Section 4.4: iALS (Hu, Koren and Volinsky, 2008), trained by alternating least
              pairs, with uniform or popularity-weighted negative samples.
 Section 4.5: what the embeddings learn, checked against the hidden tastes.
 Section 4.6: "Because you watched" from item vectors.
-Section 4.7: cold start - fold-in for a user with a few actions, and item
+Section 4.7: cold start - fold-in for held-out users from their first actions, and item
              vectors predicted from content for videos with no history.
 Section 4.8: the same honest test as Chapter 3: the "Because you watched" video
              row, a time split, settings chosen on the validation week, Chapter
@@ -25,9 +25,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "chapter_03"))
 from tesselo_shop import CATEGORIES, DAY, LANGUAGES, Config, build  # noqa: E402
-from similarity_recs import (MIN_BUYERS, NO, content_scores, group_popularity,  # noqa: E402
+from similarity_recs import (DECIMALS, MIN_BUYERS, NO, content_scores, group_popularity,  # noqa: E402
                              hit_rate, item_features, item_neighbours, lists, mcnemar_exact,
                              test_positives, top_k, user_item_scores, cf_scores)
+from implicit_scores import EVENT_WEIGHTS, active_blocks, prepare  # noqa: E402
 
 
 # ---------------------------------------------------------------- section 4.4: iALS
@@ -39,19 +40,23 @@ def ials_solve(R, Y, reg, alpha):
     Solution: x_u = (Y'Y + Y_u' (C_u - I) Y_u + reg I)^-1  Y_u' c_u.
     Y'Y is shared by all rows, so each row only touches its own few items.
     """
-    k = Y.shape[1]
-    YtY = Y.T @ Y
-    X = np.zeros((R.shape[0], k))
-    rows, cols = np.nonzero(R)
+    YtY = Y.T @ Y                                            # k x k, computed once per half-step
+    X = np.zeros((R.shape[0], Y.shape[1]))
+    rows, cols = np.nonzero(R)                               # teaching code: scans the dense R
     start = np.searchsorted(rows, np.arange(R.shape[0] + 1))
     for u in range(R.shape[0]):
         idx = cols[start[u]:start[u + 1]]
-        if len(idx) == 0:
-            continue                                         # no history: no vector
-        Yu, c = Y[idx], 1.0 + alpha * R[u, idx]
-        A = YtY + (Yu.T * (c - 1.0)) @ Yu + reg * np.eye(k)
-        X[u] = np.linalg.solve(A, Yu.T @ c)
+        if len(idx) > 0:                                     # no history: no vector (zeros)
+            X[u] = solve_row(Y, YtY, idx, R[u, idx], reg, alpha)
     return X
+
+
+def solve_row(Y, YtY, idx, r, reg, alpha):
+    """The closed-form solve for one row that engaged with items idx, with weights r.
+    Costs about len(idx) * k^2 + k^3 operations, whatever the size of the catalogue."""
+    Yu, c = Y[idx], 1.0 + alpha * r
+    A = YtY + (Yu.T * (c - 1.0)) @ Yu + reg * np.eye(Y.shape[1])
+    return np.linalg.solve(A, Yu.T @ c)
 
 
 def ials(R, k, reg, alpha, iters=10, seed=0):
@@ -69,9 +74,10 @@ def bpr(R, k, reg, lr=0.05, epochs=100, neg_power=0.0, batch=256, seed=0):
 
     Each step takes an observed pair (u, i) and a sampled item j the user has not
     engaged with, and pushes score(u, i) above score(u, j) by gradient ascent on
-    ln sigmoid(score(u, i) - score(u, j)) minus an L2 penalty. Negatives are drawn
-    in proportion to (engaged users + 1) ** neg_power: 0 is uniform, 1 follows
-    popularity.
+    ln sigmoid(score(u, i) - score(u, j)) minus an L2 penalty on every parameter,
+    the biases included. Negatives are drawn in proportion to
+    (engaged users + 1) ** neg_power: 0 is uniform, 1 follows popularity.
+    All updates in a batch are computed from the values before that batch.
     """
     rng = np.random.default_rng(seed)
     n_users, n_items = R.shape
@@ -89,44 +95,66 @@ def bpr(R, k, reg, lr=0.05, epochs=100, neg_power=0.0, batch=256, seed=0):
             j = rng.choice(n_items, len(o), p=weight / weight.sum())
             keep = ~pos[u, j]                                # j must be unobserved for u
             u, i, j = u[keep], i[keep], j[keep]
-            pu, d = P[u].copy(), Q[i] - Q[j]
-            g = 1.0 / (1.0 + np.exp(b[i] - b[j] + np.einsum("nk,nk->n", pu, d)))  # sigmoid(-x)
-            np.add.at(P, u, lr * (g[:, None] * d - reg * pu))
-            np.add.at(Q, i, lr * (g[:, None] * pu - reg * Q[i]))
-            np.add.at(Q, j, lr * (-g[:, None] * pu - reg * Q[j]))
-            np.add.at(b, i, lr * g)
-            np.add.at(b, j, -lr * g)
+            pu, qi, qj, bi, bj = P[u].copy(), Q[i].copy(), Q[j].copy(), b[i].copy(), b[j].copy()
+            g = 1.0 / (1.0 + np.exp(bi - bj + np.einsum("nk,nk->n", pu, qi - qj)))  # sigmoid(-x)
+            np.add.at(P, u, lr * (g[:, None] * (qi - qj) - reg * pu))
+            np.add.at(Q, i, lr * (g[:, None] * pu - reg * qi))
+            np.add.at(Q, j, lr * (-g[:, None] * pu - reg * qj))
+            np.add.at(b, i, lr * (g - reg * bi))
+            np.add.at(b, j, lr * (-g - reg * bj))
     return P, Q, b
 
 
 # ---------------------------------------------------------------- sections 4.5 to 4.7
-def taste_correlation(score, users, items, history_users, eligible_items, n=20_000, seed=3):
-    """Correlation between a model's score and the hidden match, on random
-    (user, item) pairs. Possible only in a simulation."""
+def taste_correlations(scorers, users, items, history_users, eligible_items, n=100_000, seed=3):
+    """Pooled Pearson correlation between each model's score and the hidden match,
+    over one sample of random (user, item) pairs: users with history, eligible items.
+    Every model is judged on the same pairs, those that all of them can score; each
+    model's coverage (the share of sampled pairs it can score) is reported apart.
+    Possible only in a simulation. Returns {name: (coverage, correlation)} and the
+    share of pairs that every model can score."""
     rng = np.random.default_rng(seed)
     u = rng.choice(history_users, n)
     i = rng.choice(np.flatnonzero(eligible_items), n)
     true = np.einsum("nd,nd->n", users["vec"][u], items["vec"][i])
-    s = score(u, i)
-    ok = np.isfinite(s)                                      # skip pairs a method may not score
-    return float(np.corrcoef(s[ok], true[ok])[0, 1])
+    s = {name: f(u, i) for name, f in scorers.items()}
+    common = np.logical_and.reduce([np.isfinite(v) for v in s.values()])
+    return ({name: (float(np.isfinite(v).mean()), float(np.corrcoef(v[common], true[common])[0, 1]))
+             for name, v in s.items()}, float(common.mean()))
 
 
 def cosine_neighbours(Y, item, k=10, allowed=None):
-    """The k items whose vectors point most nearly the same way as item's."""
-    unit = Y / np.maximum(np.linalg.norm(Y, axis=1, keepdims=True), 1e-12)
-    sim = np.round(unit @ unit[item], 9)
-    sim[item] = -np.inf
+    """Up to k items whose vectors point most nearly the same way as item's.
+    Candidates are filtered first: never the item itself, never a disallowed item,
+    never a zero vector. A zero-vector query gets an empty list."""
+    norms = np.linalg.norm(Y, axis=1)
+    cand = norms > 0
     if allowed is not None:
-        sim[~allowed] = -np.inf
-    return np.argsort(-sim, kind="stable")[:k]
+        cand &= allowed
+    cand[item] = False
+    if norms[item] == 0:
+        return np.array([], dtype=int)
+    idx = np.flatnonzero(cand)
+    sim = np.round(Y[idx] @ Y[item] / (norms[idx] * norms[item]), DECIMALS)
+    return idx[np.argsort(-sim, kind="stable")[:k]]
 
 
-def fold_in(Y, items_used, weights, reg, alpha):
-    """A vector for a new or changed user, with item vectors fixed: one iALS step."""
-    R = np.zeros((1, Y.shape[0]))
-    R[0, items_used] = weights
-    return ials_solve(R, Y, reg, alpha)[0]
+def table_neighbours(sim, item, k=10, allowed=None):
+    """Up to k neighbours from a precomputed similarity table (Chapter 3's CF).
+    Only supported links (similarity > 0) count: a list may be short or empty."""
+    cand = sim[item] > 0
+    if allowed is not None:
+        cand &= allowed
+    cand[item] = False
+    idx = np.flatnonzero(cand)
+    return idx[np.argsort(-np.round(sim[item, idx], DECIMALS), kind="stable")[:k]]
+
+
+def fold_in(Y, YtY, items_used, weights, reg, alpha):
+    """A vector for a new or changed user, with item vectors fixed: one iALS row solve.
+    YtY = Y.T @ Y is computed once per item-model version and reused for every user,
+    so the work depends on the user's few items, not on the size of the catalogue."""
+    return solve_row(Y, YtY, np.asarray(items_used), np.asarray(weights, dtype=float), reg, alpha)
 
 
 def content_to_factors(feats, Y, known, ridge=1.0):
@@ -155,7 +183,7 @@ def bpr_worked_example():
     p2 = p + lr * (g * (qi - qj) - reg * p)
     qi2 = qi + lr * (g * p - reg * qi)
     qj2 = qj + lr * (-g * p - reg * qj)
-    bi2, bj2 = bi + lr * g, bj - lr * g
+    bi2, bj2 = bi + lr * (g - reg * bi), bj + lr * (-g - reg * bj)
     x2 = bi2 - bj2 + p2 @ (qi2 - qj2)
     print(f"Worked BPR step: x {x:.4f}, sigmoid(-x) {g:.4f}; p_u ({p2[0]:.5f}, {p2[1]:.5f}); "
           f"q_i ({qi2[0]:.5f}, {qi2[1]:.5f}); q_j ({qj2[0]:.5f}, {qj2[1]:.5f}); "
@@ -190,8 +218,8 @@ if __name__ == "__main__":
                 X, Y = ials(w16, k, reg, alpha)
                 hr = hit_rate(top_k(eligible_and_scored(X[r16] @ Y.T, w16[r16], ok16), used16[r16], video),
                               r16, pos16)
-                tc = taste_correlation(lambda u, i: np.einsum("nk,nk->n", X[u], Y[i]),
-                                       users, items, hist16, ok16)
+                tc = taste_correlations({"m": lambda u, i: np.einsum("nk,nk->n", X[u], Y[i])},
+                                        users, items, hist16, ok16)[0]["m"][1]
                 print(f"  iALS k={k:>2} alpha={alpha:>4.0f} penalty={reg:>4.0f}: hit rate {hr:.3f}, "
                       f"taste correlation {tc:.2f}")
                 if best is None or hr > best[0]:
@@ -202,8 +230,8 @@ if __name__ == "__main__":
             P, Q, b = bpr(w16, k, reg=0.01, neg_power=neg)
             hr = hit_rate(top_k(eligible_and_scored(P[r16] @ Q.T + b, w16[r16], ok16), used16[r16], video),
                           r16, pos16)
-            tc = taste_correlation(lambda u, i: np.einsum("nk,nk->n", P[u], Q[i]) + b[i],
-                                   users, items, hist16, ok16)
+            tc = taste_correlations({"m": lambda u, i: np.einsum("nk,nk->n", P[u], Q[i]) + b[i]},
+                                    users, items, hist16, ok16)[0]["m"][1]
             print(f"  BPR  k={k:>2} negatives {'uniform' if neg == 0 else 'popular'}: hit rate {hr:.3f}, "
                   f"taste correlation {tc:.2f}")
             if bpr_best is None or hr > bpr_best[0]:
@@ -222,7 +250,7 @@ if __name__ == "__main__":
     hist = np.flatnonzero(history > 0)
     v = weight[weight > 0]
     print(f"\nTest-week training data: {len(v):,} positive pairs from {len(hist):,} users "
-          f"(median {np.median(history[hist]):.0f} items); weights: median {np.median(v):.2f}, "
+          f"(median {np.median(history[hist]):.0f} items) on {(engaged > 0).sum():,} items; weights: median {np.median(v):.2f}, "
           f"90th percentile {np.percentile(v, 90):.2f}, largest {v.max():.2f}, sum {v.sum():,.0f}")
     X, Y = ials(weight, k, reg, alpha)
     P, Q, b = bpr(weight, bpr_best[1], reg=0.01, neg_power=bpr_best[2])
@@ -241,19 +269,23 @@ if __name__ == "__main__":
               f"BPR, {other} negatives": eligible_and_scored(Pp @ Qp.T + bp, weight, ok),
               "hidden taste (simulation only)": match,
               "taste + popularity (simulation)": 5 * match + np.log(items["popularity"])}
-    taste = {"popular in your language": lambda u, i: lang_pop[u, i],
-             "iALS": lambda u, i: np.einsum("nk,nk->n", X[u], Y[i]),
+    taste = {"iALS": lambda u, i: np.einsum("nk,nk->n", X[u], Y[i]),
              f"BPR, {'uniform' if bpr_best[2] == 0 else 'popular'} negatives":
                  lambda u, i: np.einsum("nk,nk->n", P[u], Q[i]) + b[i],
              f"BPR, {other} negatives": lambda u, i: np.einsum("nk,nk->n", Pp[u], Qp[i]) + bp[i]}
+    tcs, _ = taste_correlations(taste, users, items, hist, ok)        # models that score every pair
+    tcf, common = taste_correlations({"CF, then popular in language": lambda u, i: cf[u, i], **taste},
+                                     users, items, hist, ok)            # on the pairs CF can score
     groups = {"all": rows, "0-4 items": rows[history[rows] <= 4], "5+ items": rows[history[rows] >= 5]}
     print(f"\nTest week (train to day 23, test days 23-30), videos only, hit rate@10")
-    print(f"{'':<34}" + "".join(f"{g:>11}" for g in groups) + f"{'full lists':>12}{'taste corr':>12}")
+    print(f"{'':<34}" + "".join(f"{g:>11}" for g in groups) + f"{'full lists':>12}{'taste, all':>12}"
+          f"{'taste, CF':>11}")
     print(f"{'users':<34}" + "".join(f"{len(v):>11,}" for v in groups.values()))
     tops = {}
     for name, s in scores.items():
         top = tops[name] = lists(s, rows, used, video)
-        tc = f"{taste_correlation(taste[name], users, items, hist, ok):>12.2f}" if name in taste else ""
+        tc = (f"{tcs[name][1]:>12.2f}" if name in tcs else f"{'':>12}") + \
+             (f"{tcf[name][1]:>11.2f}" if name in tcf else "")
         print(f"{name:<34}" + "".join(f"{hit_rate(top, rows, pos, v):>11.3f}" for v in groups.values())
               + f"{(top[:, -1] >= 0).mean():>12.0%}" + tc)
     hit = {n: {u for u, t in zip(rows.tolist(), tops[n]) if pos[u] & set(t.tolist())}
@@ -262,21 +294,26 @@ if __name__ == "__main__":
     b_only = len(hit["CF, then popular in language"] - hit["iALS, then popular in language"])
     print(f"All users: hit only with iALS chain {a_only}, only with CF chain {b_only}; "
           f"exact McNemar p = {mcnemar_exact(a_only, b_only):.2g}")
-    print(f"Taste correlation of Chapter 3 CF on the pairs it can score: "
-          f"{taste_correlation(lambda u, i: cf[u, i], users, items, hist, ok):.2f}")
+    print(f"Taste correlation = pooled Pearson between score and hidden match, on 100,000 random pairs "
+          f"(users with history, eligible videos). 'all': every sampled pair; 'CF': only the "
+          f"{common:.1%} of pairs that Chapter 3's CF can score ({round(common * 100_000):,} pairs; the CF row uses CF alone).")
 
-    # ---- section 4.6: neighbours from item vectors
-    sample = np.flatnonzero(ok)[::25]
-    def same_category(neigh):
-        return np.mean([np.mean(items["category"][neigh(i)] == items["category"][i]) for i in sample])
-    sim = item_neighbours(weight, k=10, strength=0.0)
+    # ---- section 4.6: "Because you watched" neighbours, for every eligible video
+    queries = np.flatnonzero(ok)
+    table = item_neighbours(weight, k=50, strength=0.0)       # Chapter 3's shipped table
     hidden = items["vec"].astype(np.float64)
-    print(f"\nShare of each video's 10 nearest videos in the same category ({len(sample)} videos):")
-    print(f"  iALS item vectors (cosine): {same_category(lambda i: cosine_neighbours(Y, i, 10, ok)):.0%}")
-    print(f"  Chapter 3 item-based CF:    "
-          f"{same_category(lambda i: np.argsort(-np.where(ok, sim[i], -np.inf), kind='stable')[:10]):.0%}")
-    print(f"  hidden vectors (truth):     {same_category(lambda i: cosine_neighbours(hidden, i, 10, ok)):.0%}")
-    print(f"  random videos (chance):     {np.mean([np.mean(items['category'][ok] == items['category'][i]) for i in sample]):.0%}")
+    cat = items["category"]
+    print(f"\nUp to 10 neighbours for each of {len(queries):,} eligible videos (eligible videos only, never itself):")
+    print(f"  {'neighbours from':<30}{'videos with any':>16}{'mean list length':>18}{'same category':>15}")
+    for name, neigh in (("iALS item vectors (cosine)", lambda i: cosine_neighbours(Y, i, 10, ok)),
+                        ("Chapter 3 item-based CF", lambda i: table_neighbours(table, i, 10, ok)),
+                        ("hidden vectors (truth)", lambda i: cosine_neighbours(hidden, i, 10, ok))):
+        got = [neigh(i) for i in queries]
+        same = np.concatenate([cat[g] == cat[i] for i, g in zip(queries, got)])
+        print(f"  {name:<30}{np.mean([len(g) > 0 for g in got]):>16.0%}{np.mean([len(g) for g in got]):>18.1f}"
+              f"{same.mean():>15.0%}")
+    chance = np.mean([(cat[queries] == cat[i]).sum() - 1 for i in queries]) / (len(queries) - 1)
+    print(f"  {'random eligible videos':<30}{'':>16}{'':>18}{chance:>15.0%}")
     # dot product (vector length counts) against cosine (direction only) for the user's list
     unit = Y / np.maximum(np.linalg.norm(Y, axis=1, keepdims=True), 1e-12)
     cos_s = eligible_and_scored(X @ unit.T, weight, ok)
@@ -284,23 +321,52 @@ if __name__ == "__main__":
           f"{np.corrcoef(np.linalg.norm(Y[ok], axis=1), np.log1p(engaged[ok]))[0, 1]:.2f}")
     print(f"  User's list by dot product: hit rate@10 {hit_rate(tops['iALS'], rows, pos):.3f}; "
           f"by cosine (item vectors set to length 1): {hit_rate(lists(cos_s, rows, used, video), rows, pos):.3f}")
-    anchor = sample[0]
+    anchor = queries[0]
     print(f"  Because you watched video {anchor} ({CATEGORIES[items['category'][anchor]]}): "
           + ", ".join(f"{j} ({CATEGORIES[items['category'][j]]})" for j in cosine_neighbours(Y, anchor, 5, ok)))
 
-    # ---- section 4.7: fold-in from a user's first n engaged items
+    # ---- section 4.7: fold-in for users the item model never saw
+    # Hold out every test user with 5+ items; train item vectors on everyone else.
     many = rows[history[rows] >= 5]
-    print(f"\nFold-in for users with 5+ items ({len(many):,}), using only n of their items, chosen at random:")
-    for n in (1, 3, 5):
+    w_train = weight.copy()
+    w_train[many] = 0.0
+    _, Yh = ials(w_train, k, reg, alpha)
+    YtY = Yh.T @ Yh                                           # once per item-model version
+    ok_h = video & ((w_train > 0).sum(axis=0) >= MIN_BUYERS)  # eligibility from training users only
+    lang_h = group_popularity(w_train, users["language"], len(LANGUAGES))[users["language"]]
+    typical = float(np.median(w_train[w_train > 0]))          # weight given to each early action
+    d = prepare(events, users, 23 * DAY)                      # when did each pair start?
+    sc = np.isin(d["event"], list(EVENT_WEIGHTS)) & np.isin(d["user"], many)
+    first = {}
+    for u, i, a in zip(d["user"][sc].tolist(), d["item"][sc].tolist(), d["age_days"][sc].tolist()):
+        first[(u, i)] = max(first.get((u, i), a), a)          # largest age = earliest action
+    order = {u: sorted(np.flatnonzero(weight[u] > 0).tolist(), key=lambda i: (-first[(u, i)], i))
+             for u in many}
+    blocked = {}
+    for bu, bi in active_blocks(events, users, 23 * DAY):
+        blocked.setdefault(bu, []).append(bi)
+    print(f"\nFold-in for {len(many):,} test users with 5+ items, held out of item-model training "
+          f"({(w_train > 0).any(axis=1).sum():,} training users); each early action weighted {typical:.2f}:")
+    print(f"  {'actions known':<34}{'fold-in':>9}{'popular in your language':>26}")
+    for n in (1, 3, 5, None):
         V = np.zeros((len(many), k))
-        pick = np.random.default_rng(4)
+        seen = np.zeros((len(many), n_items), dtype=bool)
         for r, u in enumerate(many):
-            idx = np.sort(pick.choice(np.flatnonzero(weight[u] > 0), n, replace=False))
-            V[r] = fold_in(Y, idx, weight[u, idx], reg, alpha)
-        top = top_k(np.where(ok[None, :], V @ Y.T, NO), used[many], video)
-        print(f"  n = {n}: hit rate@10 {hit_rate(top, many, pos):.3f}")
-    print(f"  all items (the trained vectors): "
-          f"{hit_rate(top_k(np.where(ok[None, :], X[many] @ Y.T, NO), used[many], video), many, pos):.3f}")
+            idx = order[u] if n is None else order[u][:n]
+            wts = weight[u, idx] if n is None else np.full(len(idx), typical)
+            V[r] = fold_in(Yh, YtY, idx, wts, reg, alpha)
+            if n is None:
+                seen[r] = used[u]                             # the full history is known
+            else:
+                seen[r, idx] = True                           # exclude only what is known,
+                seen[r, blocked.get(u, [])] = True            # plus active blocks
+        hits = []
+        for top in (top_k(np.where(ok_h[None, :], V @ Yh.T, NO), seen, video), top_k(lang_h[many], seen, video)):
+            hits.append({u for u, t in zip(many.tolist(), top) if pos[u] & set(t.tolist())})
+        a_only, b_only = len(hits[0] - hits[1]), len(hits[1] - hits[0])
+        label = "all, with their real weights" if n is None else f"first {n}, in time order"
+        print(f"  {label:<34}{len(hits[0]) / len(many):>9.3f}{len(hits[1]) / len(many):>26.3f}"
+              f"   only fold-in {a_only}, only chart {b_only}, McNemar p = {mcnemar_exact(a_only, b_only):.2g}")
 
     # ---- section 4.7: videos with hidden history get vectors from content
     new = (np.random.default_rng(cfg.seed + 303).random(n_items) < 0.10) & video   # as in Chapter 3

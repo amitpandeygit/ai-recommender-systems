@@ -3,7 +3,9 @@
 Model:  predicted stars = mu + b_u + b_i + p_u . q_i
 Trained with stochastic gradient descent (SGD) on the squared error plus an L2
 penalty, as in the Netflix Prize work of Funk (2006) and Koren, Bell and
-Volinsky (2009).
+Volinsky (2009). The penalty sits inside the sum over ratings: each rating
+shrinks the parameters it touches, so a user or item with many ratings is
+shrunk more often.
 
 Test: a time split, like Chapter 3. Settings are chosen on ratings given in
 days 16 to 23 (training on earlier ratings), then the model is retrained on
