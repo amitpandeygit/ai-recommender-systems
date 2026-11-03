@@ -36,7 +36,7 @@ for folder in ("chapter_03", "chapter_04", "chapter_05"):
     sys.path.insert(0, str(ROOT / folder))
 from tesselo_shop import DAY, LANGUAGES, Config, build  # noqa: E402
 from similarity_recs import (MIN_BUYERS, NO, cf_scores, content_scores, group_popularity,  # noqa: E402
-                             hit_rate, item_features, item_neighbours, mcnemar_exact,
+                             item_features, item_neighbours, mcnemar_exact,
                              test_positives, top_k, user_item_scores)
 from implicit_scores import EVENT_WEIGHTS, active_blocks, prepare  # noqa: E402
 from implicit_mf import bpr, eligible_and_scored, fold_in, ials, taste_correlations  # noqa: E402
@@ -573,10 +573,16 @@ if __name__ == "__main__":
         m_old = train_two_tower(d_old, po, pio, **MAIN, id_dropout=id_dropout)
         return m_old, embed_all(m_old, d_old), w_old
 
-    def new_video_rates(rows_new, pos_new, used_, ranks):
-        rng = np.random.default_rng(1)                      # the same draws as Chapters 3 and 4
-        return {name: np.mean([hit_rate(top_k(b_ + 1e-3 * rng.random((len(rows_new), n_items)), used_[rows_new], new),
-                                        rows_new, pos_new) for _ in range(20)]) for name, b_ in ranks}
+    def new_video_hits(rows_new, pos_new, used_, ranks):
+        """For each ranking, each user's hit at 10 averaged over 20 random tie-breaks (the same
+        draws as Chapters 3 and 4); the mean over users is the hit rate."""
+        rng = np.random.default_rng(1)
+        out = {}
+        for name, b_ in ranks:
+            draws = [top_k(b_ + 1e-3 * rng.random((len(rows_new), n_items)), used_[rows_new], new) for _ in range(20)]
+            out[name] = np.mean([[len(pos_new[u] & set(t.tolist())) > 0 for u, t in zip(rows_new, top)]
+                                 for top in draws], axis=0)
+        return out
 
     def only_new(positives):
         out = {u: s_ & set(np.flatnonzero(new).tolist()) for u, s_ in positives.items()}
@@ -589,10 +595,10 @@ if __name__ == "__main__":
     print(f"\nNew videos, validation week: {len(rn16):,} users; hiding the id vector of a share of items in training")
     for p_drop in (0.0, 0.5):
         _, (Uv, Vv), _ = masked_two_tower(w16, p_drop)
-        r_ = new_video_rates(rn16, pn16, used16, (("two-tower item tower", to01(Uv[rn16] @ Vv.T)),
+        r_ = new_video_hits(rn16, pn16, used16, (("two-tower item tower", to01(Uv[rn16] @ Vv.T)),
                                                  ("in your language, by two-tower",
                                                   lang16 + 0.5 * to01(Uv[rn16] @ Vv.T))))
-        print(f"  id dropout {p_drop}: " + "; ".join(f"{k} {v:.3f}" for k, v in r_.items()))
+        print(f"  id dropout {p_drop}: " + "; ".join(f"{k} {v.mean():.3f}" for k, v in r_.items()))
 
     m_old, (Uo, Vo), w_old = masked_two_tower(weight, 0.0)
     Xo, Yo = ials(w_old, 16, 1.0, 10.0)
@@ -606,14 +612,20 @@ if __name__ == "__main__":
     print(f"\nNew videos, test week (history-masking test of Chapters 3 and 4): {new.sum()} videos, {len(rn):,} users; "
           f"two-tower item vectors from content only (largest id-vector entry of a new video: "
           f"{np.abs(m_old.item_id.weight.detach().numpy()[new]).max():.1f})")
-    rates = new_video_rates(rn, pos_new, used, (
+    hits = new_video_hits(rn, pos_new, used, (
         ("random order", 0.0), ("in your language, random order", same_lang),
         ("in your language, by content (Chapter 3)", same_lang + 0.5 * content),
         ("predicted vectors (Chapter 4)", pred01),
         ("in your language, by predicted vectors (Chapter 4)", same_lang + 0.5 * pred01),
         ("two-tower item tower", tt01), ("in your language, by two-tower", same_lang + 0.5 * tt01)))
-    for name, v in rates.items():
-        print(f"  {name:<52} hit rate@10 {v:.3f} (standard error {np.sqrt(v * (1 - v) / len(rn)):.3f})")
+    for name, h in hits.items():
+        print(f"  {name:<52} hit rate@10 {h.mean():.3f}")
+    print("  paired differences (each user's hit, averaged over the tie-breaks, minus the other list's):")
+    tt = hits["in your language, by two-tower"]
+    for other in ("in your language, by content (Chapter 3)", "in your language, by predicted vectors (Chapter 4)"):
+        d_ = tt - hits[other]
+        print(f"    in your language, by two-tower minus {other:<46} {d_.mean():+.3f} "
+              f"(standard error {d_.std(ddof=1) / np.sqrt(len(d_)):.3f})")
     del m_old, Uo, Vo, w_old, Xo, Yo, Yhat, content, pred01, tt01, same_lang
 
     # ---- section 6.6: new users - Chapter 4's onboarding test, without fold-in
