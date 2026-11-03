@@ -225,8 +225,9 @@ def candidates(negatives, i_idx, u_idx, known, p_pop, p_batch, n_uniform, B, n_i
 
 
 def add_hard(cand, expected, mask, u_idx, hard, n_hard, rng):
-    """Append n_hard mined negatives per row. Each is a candidate for its own row only,
-    with no logQ correction (it was not drawn from a known distribution)."""
+    """Append n_hard mined negatives per row, drawn uniformly from that user's current mined
+    pool. Each is a candidate for its own row only, and is added without a logQ correction
+    on purpose, so that it counts as a full negative."""
     rows = [rng.choice(hard[u], n_hard) for u in u_idx.tolist()]
     extra = np.concatenate(rows)
     own = np.zeros((len(u_idx), len(extra)), dtype=bool)
