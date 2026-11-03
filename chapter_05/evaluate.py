@@ -4,7 +4,7 @@
   5.3  ranking metrics for every baseline on the "Because you watched" video row,
        per language, and calibration of iALS scores with Platt scaling
   5.4  beyond accuracy: diversity, novelty, serendipity, coverage, concentration
-  5.5  the baselines every model must beat
+  5.5  the baselines every model must be compared against
   5.6  three ways to split the data, a controlled test of leakage, and the sampled-metrics trap
   5.7  a simulated online test, using the hidden behaviour model of Chapter 2
   5.8  a simulated A/B test and the sample size it needs
