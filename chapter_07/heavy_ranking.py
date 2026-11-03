@@ -6,8 +6,8 @@
        guardrails, every language, the simulated online test, and the candidate
        pool behind the ranker (Chapter 6's iALS pool against a mixed pool)
 
-The ranker reorders a pool of 500 candidates per user (Chapter 6's chosen pool,
-iALS filled by popular in your language) and shows the top 10. Its score is
+The ranker reorders a pool of 500 candidates per user (adapted from Chapter 6's
+chosen pool: iALS, filled by popular in your language) and shows the top 10. Its score is
 P(click) x P(satisfied play | click).
 
 Validation week: train on impressions of days 9 to 16 (features as at day 9),

@@ -126,8 +126,9 @@ def pair_features(S, users, items, u, i):
 
 
 def candidate_pools(S, users, items, rows, size):
-    """Chapter 6's chosen pool: iALS's top videos, filled by popular in your
-    language (Chapter 3's chain), `size` candidates per user. -1 marks an empty slot."""
+    """This chapter's pool, adapted from Chapter 6's choice: iALS's top videos,
+    filled by popular in your language (Chapter 3's chain) where Chapter 6's merge
+    used "New for you"; `size` candidates per user. -1 marks an empty slot."""
     ials_score = eligible_and_scored(S["X"][rows] @ S["Y"].T, S["weight"][rows], S["ok"])
     lang = S["lang_pop"][users["language"][rows]]
     return top_k_chain([ials_score, lang], S["used"][rows], ~items["is_product"], size)
