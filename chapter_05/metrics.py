@@ -1,4 +1,4 @@
-"""Listings 5.1 to 5.3 - Metrics for recommendation lists (sections 5.3 and 5.4).
+"""Listings 5.1 and 5.2 - Metrics for recommendation lists (sections 5.3 and 5.4).
 
 Every function here scores ONE user's list, or one set of predictions, so that
 each step can be checked by hand. evaluate.py averages them over users.
@@ -6,6 +6,11 @@ each step can be checked by hand. evaluate.py averages them over users.
 A list is a sequence of item ids, best first. An id of -1 is an empty slot (the
 method had nothing more to recommend). "relevant" is the set of items the user
 went on to enjoy in the test period.
+
+The ranking metrics share one input contract, checked by check_list(): item ids
+in a list are unique, k is at least 1, and the user has at least one relevant
+item. Recall, AP, NDCG and AUC are not defined for a user with nothing relevant,
+so a caller leaves such users out of the average and reports how many there were.
 
 Needs Python 3.12 or later. Run from the repository root to see the worked example:
     python chapter_05/metrics.py
@@ -16,23 +21,38 @@ import numpy as np
 
 
 # ---------------------------------------------------------------- section 5.3: ranking
+def check_list(ranked, relevant, k=None):
+    """The input contract of every ranking metric. Raises ValueError if it is broken."""
+    if k is not None and k < 1:
+        raise ValueError("k must be at least 1")
+    ids = [i for i in (ranked[:k] if k else ranked) if i >= 0]   # -1 (empty slot) may repeat
+    if len(ids) != len(set(ids)):
+        raise ValueError("the list repeats an item id")
+    if not relevant:
+        raise ValueError("no relevant items: leave this user out of the average and count them")
+
+
 def hit_at_k(ranked, relevant, k=10):
     """1 if any of the top k is relevant, else 0."""
+    check_list(ranked, relevant, k)
     return float(any(i in relevant for i in ranked[:k]))
 
 
 def precision_at_k(ranked, relevant, k=10):
     """Relevant items in the top k, divided by k (empty slots count as misses)."""
+    check_list(ranked, relevant, k)
     return sum(i in relevant for i in ranked[:k]) / k
 
 
 def recall_at_k(ranked, relevant, k=10):
     """Relevant items in the top k, divided by all relevant items."""
+    check_list(ranked, relevant, k)
     return sum(i in relevant for i in ranked[:k]) / len(relevant)
 
 
 def reciprocal_rank(ranked, relevant, k=None):
     """1 / position of the first relevant item (positions start at 1); 0 if none."""
+    check_list(ranked, relevant, k)
     for pos, i in enumerate(ranked[:k] if k else ranked, start=1):
         if i in relevant:
             return 1.0 / pos
@@ -42,6 +62,7 @@ def reciprocal_rank(ranked, relevant, k=None):
 def average_precision(ranked, relevant, k=10):
     """Mean of precision@r over the positions r of relevant items in the top k,
     divided by min(|relevant|, k), the most hits a list of length k can hold."""
+    check_list(ranked, relevant, k)
     hits, total = 0, 0.0
     for pos, i in enumerate(ranked[:k], start=1):
         if i in relevant:
@@ -54,23 +75,25 @@ def ndcg_at_k(ranked, gains, k=10):
     """Normalised discounted cumulative gain. gains maps item -> gain (relevance);
     items not in gains have gain 0. Position r is discounted by 1 / log2(r + 1).
     The ideal list puts the largest gains first."""
+    check_list(ranked, {i for i, g in gains.items() if g > 0}, k)
     dcg = sum(gains.get(i, 0.0) / math.log2(pos + 1) for pos, i in enumerate(ranked[:k], start=1))
     best = sorted(gains.values(), reverse=True)[:k]
     idcg = sum(g / math.log2(pos + 1) for pos, g in enumerate(best, start=1))
-    return dcg / idcg if idcg > 0 else 0.0
+    return dcg / idcg
 
 
 def auc(ranked, relevant, candidates):
     """Share of (relevant, non-relevant) candidate pairs in which the relevant item
     is ranked higher. Candidates missing from the list are tied at the bottom;
     a tie counts as half. 0.5 is a random order, 1.0 a perfect one."""
+    check_list(ranked, relevant)
     pos_of = {i: p for p, i in enumerate(ranked) if i >= 0}
     bottom = len(ranked) + 1
     rank = lambda i: pos_of.get(i, bottom)                  # noqa: E731  (lower is better)
     rel = [rank(i) for i in candidates if i in relevant]
     non = np.sort([rank(i) for i in candidates if i not in relevant])
     if not rel or len(non) == 0:
-        return float("nan")
+        raise ValueError("AUC needs at least one relevant and one non-relevant candidate")
     wins = sum(len(non) - np.searchsorted(non, r, side="right") for r in rel)
     ties = sum(np.searchsorted(non, r, side="right") - np.searchsorted(non, r, side="left") for r in rel)
     return float((wins + 0.5 * ties) / (len(rel) * len(non)))
@@ -117,7 +140,8 @@ def brier(p, y):
 
 
 def fit_platt(s, y, iters=50):
-    """Platt scaling: p = sigmoid(a * s + b), fitted by Newton's method on log loss."""
+    """Platt scaling: p = sigmoid(a * s + b), fitted by Newton's method on log loss.
+    The slope a is not constrained: the map keeps the order of scores only if a > 0."""
     s, y = np.asarray(s, float), np.asarray(y, float)
     a, b = 1.0, 0.0
     for _ in range(iters):
@@ -182,6 +206,12 @@ def worked_example():
     print(f"  NDCG@10 with graded gains {graded}: {ndcg_at_k(ranked, graded):.4f}")
     cands = ranked + [50, 60, 61, 62, 63]                    # 15 candidates, 3 relevant
     print(f"  AUC over 15 candidates (50 and 60-63 unranked): {auc(ranked, relevant, cands):.4f}")
+    for bad, why in ((lambda: average_precision([1, 1], {1}, k=2), "repeated id"),
+                     (lambda: recall_at_k(ranked, set()), "no relevant items")):
+        try:
+            bad()
+        except ValueError as e:
+            print(f"  input contract ({why}): ValueError: {e}")
 
 
 if __name__ == "__main__":

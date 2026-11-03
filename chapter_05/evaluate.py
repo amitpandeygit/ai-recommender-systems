@@ -1,18 +1,18 @@
-"""Listings 5.4 to 5.6 - Evaluating Tesselo's recommenders (sections 5.2 to 5.8).
+"""Listing 5.3 and the experiments of sections 5.2 to 5.8 - Evaluating Tesselo's recommenders.
 
-  5.2  business metrics: the conversion paths in Tesselo's logs, and cross-sell in the shop
+  5.2  business metrics: conversion paths joined by impression, and cross-sell in the shop
   5.3  ranking metrics for every baseline on the "Because you watched" video row,
        per language, and calibration of iALS scores with Platt scaling
   5.4  beyond accuracy: diversity, novelty, serendipity, coverage, concentration
   5.5  the baselines every model must beat
-  5.6  three ways to split the data, and the sampled-metrics trap
+  5.6  three ways to split the data, a controlled test of leakage, and the sampled-metrics trap
   5.7  a simulated online test, using the hidden behaviour model of Chapter 2
   5.8  a simulated A/B test and the sample size it needs
 
 The recommenders are Chapter 3's and Chapter 4's, with the settings chosen there.
 Every number is a toy setting chosen to make effects visible, not a measurement.
 
-Needs Python 3.12 or later. Run from the repository root (about ten minutes):
+Needs Python 3.12 or later. Run from the repository root (about four minutes):
     python chapter_05/evaluate.py
 """
 import sys
@@ -28,7 +28,7 @@ from tesselo_shop import CATEGORIES, DAY, LANGUAGES, Config, build  # noqa: E402
 from tesselo_data import sigmoid  # noqa: E402
 from similarity_recs import (MIN_BUYERS, NO, cf_scores, group_popularity, item_neighbours,  # noqa: E402
                              test_positives, top_k, top_k_chain, user_item_scores)
-from implicit_scores import prepare  # noqa: E402
+from implicit_scores import link_same_visit, prepare  # noqa: E402
 from implicit_mf import bpr, eligible_and_scored, ials  # noqa: E402
 from metrics import (auc, average_precision, brier, diversity, ece, exposure, fit_platt,  # noqa: E402
                      gini, hit_at_k, log_loss, ndcg_at_k, novelty, precision_at_k, recall_at_k,
@@ -36,6 +36,15 @@ from metrics import (auc, average_precision, brier, diversity, ece, exposure, fi
 
 K, ALPHA, REG = 16, 10.0, 1.0            # Chapter 4's iALS settings
 HITS = ("complete", "like")
+
+# What the app can log. In Chapter 2's generator a clicked video is watched for a
+# share of its length drawn from Beta(5, 2) if the user is (hiddenly) satisfied and
+# from Beta(1, 6) if not; 80% or more counts as a completion. A satisfied user also
+# likes the video with probability 0.25. A satisfied play is a completion or a like.
+P_COMPLETE_SAT = 1 - (6 * 0.8 ** 5 - 5 * 0.8 ** 6)       # P(Beta(5, 2) >= 0.8) = 0.34464
+P_COMPLETE_UNSAT = 0.2 ** 6                               # P(Beta(1, 6) >= 0.8) = 0.000064
+P_LIKE_SAT = 0.25
+P_PLAY_SAT = 1 - (1 - P_COMPLETE_SAT) * (1 - P_LIKE_SAT)  # completion or like = 0.50848
 
 
 # ---------------------------------------------------------------- shared helpers
@@ -66,12 +75,14 @@ def ranking_table(top, rows, pos, used, video):
 
 
 def expected_outcomes(top, rows, users, items, cfg):
-    """Section 5.7: expected clicks and satisfied plays for each user's list,
-    from Chapter 2's hidden behaviour model (simulation only).
+    """Section 5.7: expected clicks and satisfied plays (completions or likes, as
+    logged) for each user's list, from Chapter 2's hidden behaviour model.
 
     A user scrolls on from one slot to the next with probability scroll_keep, so
     slot r is on screen with probability keep^(r-1) and is the slot just glimpsed
-    past with probability keep^(r-2) (1 - keep). P(look) is then divided by r^decay."""
+    past with probability keep^(r-2) (1 - keep). P(look) is then divided by r^decay.
+    A click leads to a satisfied play with probability 0.50848 if the user is
+    hiddenly satisfied and 0.000064 if not."""
     r = np.arange(1, top.shape[1] + 1)
     keep = cfg.scroll_keep
     on = keep ** (r - 1)
@@ -84,13 +95,14 @@ def expected_outcomes(top, rows, users, items, cfg):
     attract = sigmoid(5 * match - 3.5 + bait)
     satisfy = sigmoid(5 * match - 2.0 - 2 * bait)
     click = np.where(filled, p_look * attract, 0.0)
-    sat = click * satisfy
-    return click, sat
+    play = click * (satisfy * P_PLAY_SAT + (1 - satisfy) * P_COMPLETE_UNSAT)
+    return click, play
 
 
 def simulate_week(top, rows, users, items, cfg, rng, impressions=7):
     """Section 5.8: draw a week of behaviour for each user, who sees the same list
-    `impressions` times. Returns satisfied plays per user (a random outcome)."""
+    `impressions` times, exactly as Chapter 2's generator does. Returns satisfied
+    plays per user: clicked videos that were completed or liked (each counted once)."""
     total = np.zeros(len(rows))
     filled = top >= 0
     i = np.where(filled, top, 0)
@@ -106,9 +118,46 @@ def simulate_week(top, rows, users, items, cfg, rng, impressions=7):
         u = rng.random(top.shape)
         looked = u < p_look
         clicked = looked & (rng.random(top.shape) < attract)
-        satisfied = clicked & (rng.random(top.shape) < satisfy) & filled
-        total += satisfied.sum(axis=1)
+        satisfied = clicked & (rng.random(top.shape) < satisfy)
+        watch = np.where(satisfied, rng.beta(5, 2, top.shape), rng.beta(1, 6, top.shape))
+        liked = satisfied & (rng.random(top.shape) < P_LIKE_SAT)
+        total += (clicked & ((watch >= 0.8) | liked) & filled).sum(axis=1)
     return total
+
+
+def impression_funnel(events, served, users, items, end):
+    """Section 5.2: conversion steps joined by impression. Every impression served
+    before `end` to a consenting, identified user is followed through all of its
+    logged events, to the end of the log; each step counts only the impressions
+    that passed the step before. Events are de-duplicated as in prepare()."""
+    order = np.lexsort((events["server_time"], events["event_id"]))
+    first = order[np.unique(events["event_id"][order], return_index=True)[1]]
+    e = {key: val[first] for key, val in events.items()}
+    user = link_same_visit(e)
+    imp = e["impression_id"]
+    keep = (imp >= 0) & (user >= 0) & e["consent_at_time"] & users["current_consent"][np.maximum(user, 0)]
+    n = len(served["impression_id"])
+    has = {}
+    for name in ("viewable", "click", "complete", "like", "add_to_cart", "purchase"):
+        has[name] = np.zeros(n, dtype=bool)
+        has[name][imp[keep & (e["event"] == name)]] = True
+    seen = np.zeros(n, dtype=bool)
+    seen[imp[keep]] = True                     # the impression has a usable event
+    period = seen & (served["served_time"] < end)
+    product = items["is_product"][served["item_id"]]
+    out = {}
+    for kind, m in (("videos", period & ~product), ("products", period & product)):
+        view = m & has["viewable"]
+        click = view & has["click"]
+        steps = {"viewable impressions": view, "clicked": click}
+        if kind == "videos":
+            steps["satisfied play (completed or liked)"] = click & (has["complete"] | has["like"])
+        else:
+            steps["added to cart"] = click & has["add_to_cart"]
+            steps["purchased"] = steps["added to cart"] & has["purchase"]
+        out[kind] = ({s: int(v.sum()) for s, v in steps.items()},
+                     int((m & ~has["viewable"] & has["click"]).sum()))   # clicks on glimpsed slots
+    return out
 
 
 def first_hit_time(events, users, cutoff, video):
@@ -146,17 +195,19 @@ if __name__ == "__main__":
     n_users, n_items = cfg.num_users, cfg.num_items
     video = ~items["is_product"]
 
-    # ---- section 5.2: business metrics from the logs (consented, de-duplicated events)
-    d = prepare(events, users, 30 * DAY)
-    prod = items["is_product"][d["item"]]
-    count = lambda name, mask: int(((d["event"] == name) & mask).sum())   # noqa: E731
-    print("Section 5.2: conversion paths over 30 days (events of users who allowed personalisation)")
-    v = {s: count(s, ~prod) for s in ("viewable", "click", "complete", "like")}
-    p = {s: count(s, prod) for s in ("viewable", "click", "add_to_cart", "purchase")}
-    print("  videos:   " + " -> ".join(f"{s} {n:,}" for s, n in v.items()))
-    print("  products: " + " -> ".join(f"{s} {n:,}" for s, n in p.items()))
-    print(f"  product conversion: {p['purchase'] / p['viewable']:.2%} of viewable impressions, "
-          f"{p['purchase'] / p['click']:.1%} of clicks, {p['purchase'] / p['add_to_cart']:.0%} of carts")
+    # ---- section 5.2: business metrics, joined by impression
+    print("Section 5.2: conversion paths, impressions served in days 0-30 to users who allow "
+          f"personalisation (log ends on day {events['server_time'].max() / DAY:.2f})")
+    for kind, (steps, glimpsed) in impression_funnel(events, served, users, items, 30 * DAY).items():
+        vals = list(steps.items())
+        print(f"  {kind}: " + "; ".join(
+            f"{s} {n:,}" + (f" ({n / vals[j - 1][1]:.1%} of the step before)" if j else "")
+            for j, (s, n) in enumerate(vals)))
+        print(f"    clicks on glimpsed (not viewable) slots, outside the path: {glimpsed:,}")
+        if kind == "products":
+            buy = steps["purchased"]
+            print(f"    purchases: {buy / steps['viewable impressions']:.2%} of viewable impressions, "
+                  f"{buy / steps['clicked']:.1%} of clicked ones")
     order_ids, first_idx = np.unique(orders["order_id"], return_index=True)
     first_item = orders["item_id"][first_idx]
     anchored = [o for o, a in zip(order_ids, first_item) if int(a) in truth["complements"]]
@@ -177,6 +228,7 @@ if __name__ == "__main__":
     engaged = (weight > 0).sum(axis=0)
     ok = video & (engaged >= MIN_BUYERS)
     hist = (weight > 0).any(axis=1)
+    known = np.flatnonzero(users["current_consent"] & hist)   # users a model can score on day 23
     pop = group_popularity(weight, np.zeros(n_users, dtype=np.int64), 1)[0]
     by_lang = group_popularity(weight, users["language"], len(LANGUAGES))
     sim = item_neighbours(weight, k=50, strength=0.0)                         # Chapter 3's choice
@@ -209,7 +261,9 @@ if __name__ == "__main__":
     full = {name: ranked(s, rows, used, video, k=n_video) for name, s in {**methods, **sims}.items()}
     table = {name: ranking_table(t, rows, pos, used, video) for name, t in full.items()}
     print(f"\nSections 5.3 and 5.5: test week, video row, {len(rows):,} users with a hit "
-          f"(mean {np.mean([len(pos[u]) for u in rows]):.2f} relevant videos each)")
+          f"(mean {np.mean([len(pos[u]) for u in rows]):.2f} relevant videos each); of the "
+          f"{len(known):,} consenting users with history before day 23, "
+          f"{len(known) - np.isin(known, rows).sum():,} had no relevant video and are left out")
     print_rank_table("", table, ("hit@10", "P@10", "R@10", "MRR", "MAP@10", "NDCG@10", "AUC"))
 
     # per language, NDCG@10 (user-side fairness); report languages with 100+ test users
@@ -225,32 +279,46 @@ if __name__ == "__main__":
                                  for u, t in zip(rows[m], full[name][m])]) if m.sum() >= 100 else np.nan)
         print(f"  {name:<34}" + "".join(f"{x:>11.3f}" for x in vals))
 
-    # ---- section 5.3: calibration of iALS scores, Platt scaling fitted on the validation week
+    # ---- section 5.3: calibration of iALS scores, Platt scaling fitted on the validation week.
+    # The probability: that the user completes or likes the video in the next 7 days, while
+    # the current system runs the feed. Users are chosen as at prediction time: everyone who
+    # allows personalisation and has history, whatever they go on to do.
     w16, used16 = user_item_scores(events, users, 16 * DAY, n_users, n_items)
     pos16 = test_positives(events, users, 16 * DAY, 23 * DAY, used16, video)
-    r16 = np.array(sorted(pos16))
+    known16 = np.flatnonzero(users["current_consent"] & (w16 > 0).any(axis=1))
     ok16 = video & ((w16 > 0).sum(axis=0) >= MIN_BUYERS)
     X16, Y16 = ials(w16, K, REG, ALPHA)
 
-    def candidate_pairs(Xm, Ym, w, u_rows, usedm, okm, positives, n=50):
-        s = eligible_and_scored(Xm[u_rows] @ Ym.T, w[u_rows], okm)
-        s = np.where(usedm[u_rows], NO, s)
-        top = np.argsort(-s, axis=1, kind="stable")[:, :n]
-        sc = np.take_along_axis(s, top, axis=1)
-        y = np.array([[i in positives[u] for i in t] for u, t in zip(u_rows, top)])
-        keep = np.isfinite(sc)
-        return sc[keep], y[keep].astype(float)
+    def candidate_pairs(Xm, Ym, w, u_rows, usedm, okm, positives, n=50, chunk=1000):
+        scores, labels = [], []
+        for c in range(0, len(u_rows), chunk):
+            rr = u_rows[c:c + chunk]
+            s = eligible_and_scored(Xm[rr] @ Ym.T, w[rr], okm)
+            s = np.where(usedm[rr], NO, s)
+            top = np.argsort(-s, axis=1, kind="stable")[:, :n]
+            sc = np.take_along_axis(s, top, axis=1)
+            y = np.array([[i in positives.get(u, ()) for i in t] for u, t in zip(rr, top)])
+            keep = np.isfinite(sc) & (sc > NO)
+            scores.append(sc[keep])
+            labels.append(y[keep].astype(float))
+        return np.concatenate(scores), np.concatenate(labels)
 
-    s_val, y_val = candidate_pairs(X16, Y16, w16, r16, used16, ok16, pos16)
-    s_te, y_te = candidate_pairs(X, Y, weight, rows, used, ok, pos)
+    s_val, y_val = candidate_pairs(X16, Y16, w16, known16, used16, ok16, pos16)
+    s_te, y_te = candidate_pairs(X, Y, weight, known, used, ok, pos)
     a, b = fit_platt(s_val, y_val)
     raw = np.clip(s_te, 0, 1)
     platt = 1 / (1 + np.exp(-(a * s_te + b)))
-    print(f"\nCalibration: iALS top-50 candidates; Platt scaling fitted on {len(s_val):,} validation pairs "
-          f"(a = {a:.2f}, b = {b:.2f}); tested on {len(s_te):,} test pairs, observed rate {y_te.mean():.4f}")
+    print(f"\nCalibration: iALS top-50 candidates of every consenting user with history; Platt scaling "
+          f"fitted on {len(s_val):,} validation pairs ({len(known16):,} users, observed rate "
+          f"{y_val.mean():.4f}): a = {a:.2f}, b = {b:.2f} (a > 0, so the order is kept: {a > 0}); "
+          f"tested on {len(s_te):,} test pairs ({len(known):,} users), observed rate {y_te.mean():.4f}")
     print(f"  {'':<34}{'mean p':>9}{'ECE':>9}{'log loss':>10}{'Brier':>9}")
     for name, pr in (("raw score, clipped to 0-1", raw), ("Platt scaling", platt)):
         print(f"  {name:<34}{pr.mean():>9.4f}{ece(pr, y_te):>9.4f}{log_loss(pr, y_te):>10.4f}{brier(pr, y_te):>9.4f}")
+    s_sel, y_sel = candidate_pairs(X, Y, weight, rows, used, ok, pos)       # users chosen by their future
+    p_sel = 1 / (1 + np.exp(-(a * s_sel + b)))
+    print(f"  the same map on only the {len(rows):,} users who went on to a hit: {len(s_sel):,} pairs, "
+          f"observed rate {y_sel.mean():.4f}, mean Platt prediction {p_sel.mean():.4f}")
     print("  ten equal-size groups of test pairs, sorted by prediction (mean prediction : observed rate):")
     for name, pr in (("raw", raw), ("platt", platt)):
         print(f"  {name:<6}" + "  ".join(f"{m:.3f}:{o:.3f}" for m, o, _ in reliability_by_rank(pr, y_te)))
@@ -259,8 +327,9 @@ if __name__ == "__main__":
     hist_share = (engaged + 1) / (hist.sum() + 1)
     chart = ranked(lang_pop, rows, used, video)                               # the obvious list
     creators = items["creator"]
-    cpop = np.bincount(creators, weights=engaged.astype(float), minlength=creators.max() + 1)
-    top_creators = set(np.argsort(-cpop)[: len(cpop) // 10].tolist())
+    vc = np.unique(creators[video])                           # creators with at least one video
+    cpop = np.bincount(creators[video], weights=engaged[video].astype(float), minlength=creators.max() + 1)
+    top_creators = set(vc[np.argsort(-cpop[vc], kind="stable")][: len(vc) // 10].tolist())
     print(f"\nSection 5.4: beyond accuracy, top-10 lists of the {len(rows):,} test users "
           f"({ok.sum():,} eligible videos)")
     print(f"  {'':<34}{'diversity':>10}{'novelty':>9}{'serendip.':>10}{'coverage':>10}{'Gini':>7}"
@@ -277,7 +346,8 @@ if __name__ == "__main__":
         cov = np.mean(exp[ok] > 0)
         top_share = sum(exp[i] for i in np.flatnonzero(exp) if creators[i] in top_creators) / exp.sum()
         print(f"  {name:<34}{div:>10.2f}{nov:>9.2f}{ser:>10.4f}{cov:>10.1%}{gini(exp[ok]):>7.2f}{top_share:>18.1%}")
-    print(f"  (the top 10% of creators own {np.isin(creators[ok], list(top_creators)).mean():.1%} "
+    print(f"  (top 10% = the {len(top_creators)} of {len(vc)} video creators whose videos had the most "
+          f"engaged users before day 23; they own {np.isin(creators[ok], list(top_creators)).mean():.1%} "
           f"of eligible videos)")
 
     # ---- section 5.6: three splits, the same methods
@@ -320,6 +390,25 @@ if __name__ == "__main__":
         for m, t in res.items():
             print(f"    {m:<34} hit@10 {t['hit@10']:.3f}  NDCG@10 {t['NDCG@10']:.3f}")
 
+    # ---- section 5.6: a controlled test of leakage - same users, same targets, same exclusions;
+    # only the training data changes. Half of the time-split test users are evaluated; the
+    # leaked training set adds every other user's days 23 to 30 (Ji and colleagues' global timeline).
+    half = np.random.default_rng(cfg.seed + 505).random(len(rows)) < 0.5
+    ev_rows = rows[half]
+    leaked = w30.copy()
+    leaked[ev_rows] = weight[ev_rows]
+    tg = {u: pos[u] for u in ev_rows}
+    print(f"\nControlled leakage test: {len(ev_rows):,} time-split test users, their test-week targets "
+          f"({np.mean([len(tg[u]) for u in ev_rows]):.2f} each) and day-23 exclusions, two training sets")
+    for name, w in (("train: everyone before day 23", weight), ("train: + other users' days 23-30", leaked)):
+        sc = split_scores(w, users)
+        print(f"  {name}")
+        for m, s_fn in sc.items():
+            t = ranking_table(ranked(s_fn, ev_rows, used, video, k=n_video), ev_rows, tg, used, video)
+            print(f"    {m:<34} hit@10 {t['hit@10']:.3f}  NDCG@10 {t['NDCG@10']:.3f}")
+        del sc
+    del leaked
+
     # ---- section 5.6: sampled metrics - rank each user's hits among 100 random videos
     samp_rng = np.random.default_rng(cfg.seed + 502)
     print("\nSampled metrics: each test user's relevant videos ranked among 100 random unused videos")
@@ -346,18 +435,23 @@ if __name__ == "__main__":
     on = cfg.scroll_keep ** (r - 1)
     gl = np.where(r >= 2, cfg.scroll_keep ** np.maximum(r - 2, 0) * (1 - cfg.scroll_keep), 0.0)
     print("  P(look) by slot 1-10: " + " ".join(f"{x:.3f}" for x in (on + cfg.glimpse_look * gl) / r ** cfg.look_decay))
-    print(f"  {'':<34}{'NDCG@10 (offline)':>18}{'clicks':>8}{'satisfied':>10}{'per click':>10}{'clickbait':>10}")
-    online = {}
+    print("  satisfied play = a completion or a like; the last column is the same measure for the "
+          f"{len(rows):,} offline test users (one cohort for offline and online)")
+    print(f"  {'':<34}{'NDCG@10 (offline)':>18}{'clicks':>8}{'satisfied':>10}{'per click':>10}"
+          f"{'clickbait':>10}{'satisfied, test users':>23}")
+    online, online_rows = {}, {}
     for name, s in {**methods, **sims}.items():
         top = ranked(s, aud, used, video)
-        click, sat = expected_outcomes(top, aud, users, items, cfg)
-        online[name] = (top, sat.sum(axis=1))
+        click, play = expected_outcomes(top, aud, users, items, cfg)
+        online[name] = (top, play.sum(axis=1))
+        online_rows[name] = expected_outcomes(full[name][:, :10], rows, users, items, cfg)[1].sum(axis=1).mean()
         bait = np.mean(items["clickbait"][top[top >= 0]] > 0)
         print(f"  {name:<34}{table[name]['NDCG@10']:>18.3f}{click.sum(axis=1).mean():>8.3f}"
-              f"{sat.sum(axis=1).mean():>10.3f}{sat.sum() / click.sum():>10.3f}{bait:>10.1%}")
+              f"{play.sum(axis=1).mean():>10.4f}{play.sum() / click.sum():>10.3f}{bait:>10.1%}"
+              f"{online_rows[name]:>23.4f}")
     base, new = online["CF, then popular in language"][1], online["iALS, then popular in language"][1]
     print(f"  lift in expected satisfied plays, iALS chain over CF chain: "
-          f"({new.mean():.4f} - {base.mean():.4f}) / {base.mean():.4f} = {(new.mean() - base.mean()) / base.mean():.1%}")
+          f"({new.mean():.5f} - {base.mean():.5f}) / {base.mean():.5f} = {(new.mean() - base.mean()) / base.mean():.1%}")
 
     # ---- section 5.8: a simulated A/B test, one week, users split at random into two halves
     ab_rng = np.random.default_rng(cfg.seed + 503)
@@ -377,9 +471,9 @@ if __name__ == "__main__":
     chi2 = ((len(ya) - n_exp) ** 2 + (len(yb) - n_exp) ** 2) / n_exp
     print(f"  sample ratio check: {len(ya):,} and {len(yb):,} users, expected {n_exp:,.0f} each; "
           f"chi-square {chi2:.3f}, p = {1 - erf(sqrt(chi2 / 2)):.2f}")
-    print(f"  control (CF chain): {len(ya):,} users, mean {ya.mean():.4f} satisfied plays, sd {ya.std(ddof=1):.4f}")
-    print(f"  treatment (iALS chain): {len(yb):,} users, mean {yb.mean():.4f}, sd {yb.std(ddof=1):.4f}")
-    print(f"  difference {diff:.4f} ({diff / ya.mean():.1%}), standard error {se:.4f}, "
+    print(f"  control (CF chain): {len(ya):,} users, mean {ya.mean():.5f} satisfied plays, sd {ya.std(ddof=1):.5f}")
+    print(f"  treatment (iALS chain): {len(yb):,} users, mean {yb.mean():.5f}, sd {yb.std(ddof=1):.5f}")
+    print(f"  difference {diff:.5f} ({diff / ya.mean():.1%}), standard error {se:.5f}, "
           f"95% interval {diff - 1.96 * se:.4f} to {diff + 1.96 * se:.4f}, z = {z:.2f}, "
           f"p {'< 1e-10' if p_two < 1e-10 else f'= {p_two:.2g}'}")
     sd = ya.std(ddof=1)
