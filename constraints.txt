@@ -1,2 +1,4 @@
 # Exact versions used to produce the printed output in the book
 numpy==2.5.4
+torch==2.15.0
+faiss-cpu==1.15.1
