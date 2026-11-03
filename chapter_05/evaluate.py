@@ -28,7 +28,7 @@ from tesselo_shop import CATEGORIES, DAY, LANGUAGES, Config, build  # noqa: E402
 from tesselo_data import sigmoid  # noqa: E402
 from similarity_recs import (MIN_BUYERS, NO, cf_scores, group_popularity, item_neighbours,  # noqa: E402
                              test_positives, top_k, top_k_chain, user_item_scores)
-from implicit_scores import link_same_visit, prepare  # noqa: E402
+from implicit_scores import EVENT_WEIGHTS, link_same_visit, pair_sums, prepare  # noqa: E402
 from implicit_mf import bpr, eligible_and_scored, ials  # noqa: E402
 from metrics import (auc, average_precision, brier, diversity, ece, exposure, fit_platt,  # noqa: E402
                      gini, hit_at_k, log_loss, ndcg_at_k, novelty, precision_at_k, recall_at_k,
@@ -168,6 +168,24 @@ def first_hit_time(events, users, cutoff, video):
     for u, i, a in zip(d["user"][m].tolist(), d["item"][m].tolist(), d["age_days"][m].tolist()):
         first[(u, i)] = max(first.get((u, i), a), a)
     return first
+
+
+def weights_one_reference(events, users, n_users, n_items, future_rows):
+    """Section 5.6: user x item weights built as in Chapter 3's user_item_scores, but
+    with every event aged to one reference day (day 30), so that two training sets
+    differ only in which events they hold. Events from day 23 on are kept only for
+    the users in future_rows; everyone else's stop at day 23."""
+    d = prepare(events, users, 30 * DAY)
+    allowed = np.zeros(n_users, dtype=bool)
+    allowed[future_rows] = True
+    keep = (d["age_days"] >= 7) | allowed[d["user"]]          # age 7 days or more = before day 23
+    scored = keep & np.isin(d["event"], list(EVENT_WEIGHTS))
+    pairs, raw, blocked = pair_sums(d["user"][scored], d["item"][scored], d["event"][scored],
+                                    d["age_days"][scored])
+    weight = np.zeros((n_users, n_items))
+    ok = (raw > 0) & ~blocked
+    weight[pairs[ok, 0], pairs[ok, 1]] = np.log1p(raw[ok])
+    return weight
 
 
 def split_scores(weight, users, k=K):
@@ -390,24 +408,26 @@ if __name__ == "__main__":
         for m, t in res.items():
             print(f"    {m:<34} hit@10 {t['hit@10']:.3f}  NDCG@10 {t['NDCG@10']:.3f}")
 
-    # ---- section 5.6: a controlled test of leakage - same users, same targets, same exclusions;
-    # only the training data changes. Half of the time-split test users are evaluated; the
-    # leaked training set adds every other user's days 23 to 30 (Ji and colleagues' global timeline).
+    # ---- section 5.6: a controlled test of leakage - same users, same targets, same exclusions,
+    # every event aged to the same reference day; only the events in training change. About half
+    # of the time-split test users are evaluated; the leaked training set adds every other user's
+    # days 23 to 30 (Ji and colleagues' global timeline).
     half = np.random.default_rng(cfg.seed + 505).random(len(rows)) < 0.5
     ev_rows = rows[half]
-    leaked = w30.copy()
-    leaked[ev_rows] = weight[ev_rows]
+    others = np.setdiff1d(np.arange(n_users), ev_rows)
+    control = weights_one_reference(events, users, n_users, n_items, np.array([], dtype=np.int64))
+    leaked = weights_one_reference(events, users, n_users, n_items, others)
     tg = {u: pos[u] for u in ev_rows}
     print(f"\nControlled leakage test: {len(ev_rows):,} time-split test users, their test-week targets "
           f"({np.mean([len(tg[u]) for u in ev_rows]):.2f} each) and day-23 exclusions, two training sets")
-    for name, w in (("train: everyone before day 23", weight), ("train: + other users' days 23-30", leaked)):
+    for name, w in (("train: everyone before day 23", control), ("train: + other users' days 23-30", leaked)):
         sc = split_scores(w, users)
         print(f"  {name}")
         for m, s_fn in sc.items():
             t = ranking_table(ranked(s_fn, ev_rows, used, video, k=n_video), ev_rows, tg, used, video)
             print(f"    {m:<34} hit@10 {t['hit@10']:.3f}  NDCG@10 {t['NDCG@10']:.3f}")
         del sc
-    del leaked
+    del control, leaked
 
     # ---- section 5.6: sampled metrics - rank each user's hits among 100 random videos
     samp_rng = np.random.default_rng(cfg.seed + 502)
@@ -449,6 +469,16 @@ if __name__ == "__main__":
         print(f"  {name:<34}{table[name]['NDCG@10']:>18.3f}{click.sum(axis=1).mean():>8.3f}"
               f"{play.sum(axis=1).mean():>10.4f}{play.sum() / click.sum():>10.3f}{bait:>10.1%}"
               f"{online_rows[name]:>23.4f}")
+    # guardrails on the lists each method would show all consenting users (the A/B audience)
+    print(f"  guardrails if each method served all {len(aud):,} users: catalogue coverage and exposure "
+          "to the top-10% creators (section 5.4 definitions)")
+    for name in methods:
+        exp = np.zeros(n_items)
+        for lst in online[name][0]:
+            for i, e in exposure(lst.tolist()).items():
+                exp[i] += e
+        share = sum(exp[i] for i in np.flatnonzero(exp) if creators[i] in top_creators) / exp.sum()
+        print(f"    {name:<38} coverage {np.mean(exp[ok] > 0):6.1%}   top-10% creators {share:6.1%}")
     base, new = online["CF, then popular in language"][1], online["iALS, then popular in language"][1]
     print(f"  lift in expected satisfied plays, iALS chain over CF chain: "
           f"({new.mean():.5f} - {base.mean():.5f}) / {base.mean():.5f} = {(new.mean() - base.mean()) / base.mean():.1%}")
