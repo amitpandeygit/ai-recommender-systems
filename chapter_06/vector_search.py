@@ -17,36 +17,38 @@ are counts that do not depend on the machine: distances computed per query and
 bytes stored per item. Times are measured on one machine, one thread, and are
 only an illustration.
 
+This file never imports PyTorch: the vectors come from embed_catalogue.py, which
+this file runs in a separate process first (see that file for why).
+
 Needs Python 3.12 or later. Run from the repository root (about 15 minutes on a two-core machine):
     python chapter_06/vector_search.py
 """
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 import faiss
 import numpy as np
-import torch
 
 HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-from tesselo_catalogue import build_catalogue  # noqa: E402
-from two_tower import MAIN, embed_all, make_data, train_two_tower  # noqa: E402
-from tesselo_shop import DAY, Config  # noqa: E402
-from similarity_recs import item_features, user_item_scores  # noqa: E402
-from implicit_mf import ials  # noqa: E402
 
 faiss.omp_set_num_threads(1)               # one thread: deterministic builds, comparable timings
 K = 10
 
 
 # ---------------------------------------------------------------- 1. MIPS as nearest-neighbour search
-def mips_to_nn(items, queries):
-    """Bachrach and colleagues (2014): with M the largest item length, append
+def mips_to_nn(items, queries, M=None):
+    """Bachrach and colleagues (2014): with M at least the largest item length, append
     sqrt(M^2 - |x|^2) to every item and 0 to every query. Then
-    |q - x|^2 = |q|^2 + M^2 - 2 q.x, so the smallest distance is the largest dot product."""
+    |q - x|^2 = |q|^2 + M^2 - 2 q.x, so the smallest distance is the largest dot product.
+    M belongs to the index version: items added later must use the same M, and an item
+    longer than M cannot be added (the index must be rebuilt with a larger M)."""
     norms2 = (items ** 2).sum(axis=1)
-    M2 = norms2.max()
+    M2 = norms2.max() if M is None else M ** 2
+    if norms2.max() > M2 * (1 + 1e-9):
+        raise ValueError("an item is longer than the index's bound M: rebuild the index with a larger M")
     extra = np.sqrt(np.maximum(M2 - norms2, 0.0))
     return (np.hstack([items, extra[:, None]]).astype(np.float32),
             np.hstack([queries, np.zeros((len(queries), 1))]).astype(np.float32))
@@ -239,36 +241,15 @@ def index_bytes(index):
 
 if __name__ == "__main__":
     t0 = time.time()
-    cfg = Config()
-    users, items, events, cat, _ = build_catalogue(cfg)
-    n_users, n_items = cfg.num_users, len(items["vec"])
-    print(f"Catalogue: {len(cat['vec']):,} items, {cat['n_original']:,} with history  [{time.time() - t0:.0f} s]")
-
-    # ---- the query users and the two-tower model of section 6.6 (MAIN settings, trained to day 23)
-    weight, used = user_item_scores(events, users, 23 * DAY, n_users, n_items)
-    feats = item_features(items, n_items)
-    data = make_data(weight, items, users, feats, int(items["creator"].max()) + 1)
-    pu, pi = np.nonzero(weight > 0)
-    model = train_two_tower(data, pu, pi, **MAIN)
-    U, V5 = embed_all(model, data)
-    hist = np.flatnonzero((weight > 0).any(axis=1))
-    qusers = np.sort(np.random.default_rng(cfg.seed + 610).choice(hist, 1_000, replace=False))
-    Q = U[qusers]
-    with torch.no_grad():                                             # new items: content only
-        V = np.zeros((len(cat["vec"]), V5.shape[1]))
-        V[:n_items] = V5
-        f = torch.as_tensor(cat["feats"])
-        c = torch.as_tensor(cat["creator"])
-        for s in range(n_items, len(V), 100_000):
-            e = min(s + 100_000, len(V))
-            V[s:e] = model.item_from_inputs(torch.zeros(e - s, model.item_id.embedding_dim),
-                                            f[s:e], c[s:e]).numpy()
-    del f, c, cat["feats"], events, data, model, feats, U, V5       # free memory for the indexes
-    print(f"Item vectors: {V.shape[0]:,} x {V.shape[1]}; query users: {len(Q):,}  [{time.time() - t0:.0f} s]")
+    with tempfile.TemporaryDirectory() as tmp:                     # PyTorch runs in its own process
+        path = Path(tmp) / "vectors.npy"
+        subprocess.run([sys.executable, str(HERE / "embed_catalogue.py"), str(path)], check=True)
+        saved = np.load(path, allow_pickle=True).item()
+    V, Q, n_items = saved["V"], saved["Q"], int(saved["n_items"])
+    q4, Y4, upload_day, seed = saved["q4"], saved["Y4"], saved["upload_day"], int(saved["seed"])
+    del saved
 
     # ---- 1. MIPS as nearest-neighbour search, on Chapter 4's iALS vectors (5,000 items)
-    X4, Y4 = ials(weight, 16, 1.0, 10.0)
-    q4 = X4[qusers]
     _, ex4 = exact_top(q4, Y4)
     norms = np.linalg.norm(Y4, axis=1)
     print(f"\n1. MIPS on Chapter 4's iALS vectors: item lengths from {norms[norms > 0].min():.3f} to "
@@ -345,7 +326,7 @@ if __name__ == "__main__":
 
     # ---- 3. Faiss on one million items
     d = Vt.shape[1]
-    sample = Vt[np.random.default_rng(cfg.seed + 611).choice(len(Vt), 100_000, replace=False)]
+    sample = Vt[np.random.default_rng(seed + 611).choice(len(Vt), 100_000, replace=False)]
     print(f"\n3. Faiss, {len(Vt):,} items without history, {len(Q):,} queries, one thread")
     print(f"  {'index':<40}{'recall@10':>10}{'distances':>12}{'ms/query':>10}{'bytes/item':>12}")
     flat = faiss.IndexFlatL2(d)
@@ -402,7 +383,7 @@ if __name__ == "__main__":
           f"merged by score: recall@10 {recall_vs_exact(merged, Q, V, full_s):.3f}")
 
     # ---- 4. filtered search: a "New this month" row allows only items uploaded in the last 30 days
-    allowed = cat["upload_day"][n_items:] >= 335
+    allowed = upload_day[n_items:] >= 335
     ids = np.flatnonzero(allowed)
     _, fexact_s = exact_top(Q, cold[ids])
     frec = lambda found: recall_vs_exact(found, Q, cold, fexact_s)            # noqa: E731

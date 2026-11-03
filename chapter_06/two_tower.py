@@ -5,8 +5,9 @@
        language, title words and creator; both end in a unit-length vector,
        and the score is their dot product divided by a temperature
   6.4  training with a softmax over sampled candidates: uniform, popular,
-       in-batch and mixed negatives, the logQ correction for how often each
-       item is sampled, and hard negatives mined from the model itself
+       in-batch and mixed negatives (from warm items, or from the whole catalogue),
+       the logQ correction for how often each item is sampled, and hard
+       negatives mined from the model itself
   6.5  exposure bias: negatives taken from what the old system showed
   6.6  the honest test of Chapter 5: the time split, the fixed baselines,
        recall@100 and recall@200 for the retrieval job, the guardrails, the
@@ -19,7 +20,7 @@ Settings are chosen on the validation week, never on the test week.
 
 This is a laptop-scale PyTorch implementation for teaching (CPU only).
 
-Needs Python 3.12 or later. Run from the repository root (about 26 minutes on a two-core machine):
+Needs Python 3.12 or later. Run from the repository root (about 30 minutes on a two-core machine):
     pip install -r requirements.txt -c constraints.txt
     python chapter_06/two_tower.py
 """
@@ -133,7 +134,10 @@ def train_two_tower(data, pos_u, pos_i, negatives="mixed", logq=True, temperatur
     negatives: "uniform"  n_uniform items drawn uniformly from the items with history
                "popular"  n_uniform items drawn in proportion to their positives
                "in-batch" the other positives in the same batch
-               "mixed"    in-batch plus n_uniform uniform items (Yang and colleagues, 2020)
+               "mixed"    in-batch plus n_uniform uniform items from the items with history: a
+                          version of Yang and colleagues' (2020) mixed sampling limited to warm items
+               "mixed-all" in-batch plus n_uniform uniform items from the whole catalogue, as
+                          Yang and colleagues drew them (items with no positives included)
                "impressions" items the old system showed the user that they did not engage with
     logq:      subtract log(expected count) of each item among the candidates
     n_hard:    per user, add this many hard negatives mined from the model's own ranking
@@ -191,6 +195,8 @@ def expected_of(items, negatives, p_batch, known, p_pop, n_uniform, B):
         e += B * p_batch[items]
     if negatives in ("uniform", "mixed"):
         e += n_uniform / len(known)
+    if negatives == "mixed-all":
+        e += B * p_batch[items] + n_uniform / len(p_batch)
     if negatives == "popular":
         q = np.zeros(len(p_batch))
         q[known] = p_pop
@@ -204,6 +210,8 @@ def candidates(negatives, i_idx, u_idx, known, p_pop, p_batch, n_uniform, B, n_i
     cand = np.empty(0, dtype=np.int64)
     if negatives in ("in-batch", "mixed"):
         cand = np.concatenate([cand, i_idx])                       # the batch's own positives
+    if negatives == "mixed-all":
+        cand = np.concatenate([cand, i_idx, rng.choice(n_items, n_uniform)])   # any item can be drawn
     if negatives in ("uniform", "mixed"):
         cand = np.concatenate([cand, rng.choice(known, n_uniform)])
     if negatives == "popular":
@@ -433,6 +441,7 @@ if __name__ == "__main__":
                 "in-batch, no correction": dict(negatives="in-batch", logq=False),
                 "in-batch, logQ": dict(negatives="in-batch", logq=True),
                 "mixed, logQ (MAIN)": dict(negatives="mixed", logq=True),
+                "mixed over all items, logQ": dict(negatives="mixed-all", logq=True),
                 "mixed, logQ, 4 hard negatives": dict(negatives="mixed", logq=True, n_hard=4),
                 "impression negatives (6.5)": dict(negatives="impressions", logq=False)}
     models, taste = {}, {}
@@ -445,7 +454,7 @@ if __name__ == "__main__":
         del s
         taste[name] = taste_correlations({"m": lambda u, i, U=U, V=V: np.einsum("nk,nk->n", U[u], V[i])},
                                          users, items, hist_users, ok)[0]["m"][1]
-    print(f"\nSections 6.4 and 6.5: one two-tower model, eight ways to choose negatives "
+    print(f"\nSections 6.4 and 6.5: one two-tower model, nine ways to choose negatives "
           f"(each list filled by popular in your language)  [{time.time() - t0:.0f} s]")
     print(f"  {'':<42}{'NDCG@10':>8}{'R@200':>8}{'coverage':>10}{'top-10% cr.':>12}{'online':>8}{'taste':>7}")
     for name in variants:
@@ -454,6 +463,8 @@ if __name__ == "__main__":
               f"{t['online']:>8.4f}{taste[name]:>7.2f}")
     print("  (offline on the test users; online = expected satisfied plays per list, all consenting users; "
           "taste = pooled correlation with the hidden match)")
+    print(f"  items with no positive pair before day 23 (only 'mixed over all items' can draw them): "
+          f"{int((~data['known']).sum()):,} of {n_items:,}")
 
     # what the negatives are, in the hidden truth (simulation only)
     def p_enjoy(u, i):
@@ -529,14 +540,24 @@ if __name__ == "__main__":
     b_only = len(hit["iALS, then popular in language"] - hit["two-tower: mixed, logQ (MAIN)"])
     print(f"  hit@10, two-tower against iALS: only two-tower {a_only}, only iALS {b_only}; "
           f"exact McNemar p = {mcnemar_exact(a_only, b_only):.2g}")
+    per_user = {name: np.array([ndcg_at_k(t.tolist(), {i: 1.0 for i in pos[u]})
+                                for u, t in zip(rows, results[name]["full"])])
+                for name in ("popular in your language", "iALS, then popular in language",
+                             "two-tower: mixed, logQ (MAIN)")}
+    se = lambda x: x.std(ddof=1) / np.sqrt(len(x))                                  # noqa: E731
+    for name in ("iALS, then popular in language", "two-tower: mixed, logQ (MAIN)"):
+        h = np.array([u in hit[name] for u in rows.tolist()], dtype=float)
+        print(f"  standard errors, {name}: hit@10 {h.mean():.3f} ({se(h):.3f}), "
+              f"NDCG@10 {per_user[name].mean():.3f} ({se(per_user[name]):.3f})")
     lang_rows = users["language"][rows]
     print("  NDCG@10 by user language:", "  ".join(f"{g} ({(lang_rows == j).sum()})" for j, g in enumerate(LANGUAGES)))
-    for name in ("popular in your language", "iALS, then popular in language", "two-tower: mixed, logQ (MAIN)"):
-        full = results[name]["full"]
-        vals = [np.mean([ndcg_at_k(t.tolist(), {i: 1.0 for i in pos[u]}) for u, t in zip(rows[lang_rows == j],
-                                                                                      full[lang_rows == j])])
-                for j in range(len(LANGUAGES))]
-        print(f"    {name:<40}" + "".join(f"{x:>8.3f}" for x in vals))
+    for name, v in per_user.items():
+        print(f"    {name:<40}" + "".join(f"{v[lang_rows == j].mean():>8.3f}" for j in range(len(LANGUAGES))))
+    diff = per_user["two-tower: mixed, logQ (MAIN)"] - per_user["iALS, then popular in language"]
+    print(f"    {'two-tower minus iALS':<40}" + "".join(f"{diff[lang_rows == j].mean():>8.3f}"
+                                                         for j in range(len(LANGUAGES))))
+    print(f"    {'  standard error of the difference':<40}" + "".join(f"{se(diff[lang_rows == j]):>8.3f}"
+                                                                     for j in range(len(LANGUAGES))))
     print(f"[{time.time() - t0:.0f} s]")
     del results, models, data, data_b, sb, U, V
 
@@ -592,7 +613,7 @@ if __name__ == "__main__":
         ("in your language, by predicted vectors (Chapter 4)", same_lang + 0.5 * pred01),
         ("two-tower item tower", tt01), ("in your language, by two-tower", same_lang + 0.5 * tt01)))
     for name, v in rates.items():
-        print(f"  {name:<52} hit rate@10 {v:.3f}")
+        print(f"  {name:<52} hit rate@10 {v:.3f} (standard error {np.sqrt(v * (1 - v) / len(rn)):.3f})")
     del m_old, Uo, Vo, w_old, Xo, Yo, Yhat, content, pred01, tt01, same_lang
 
     # ---- section 6.6: new users - Chapter 4's onboarding test, without fold-in
