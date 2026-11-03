@@ -15,7 +15,7 @@ choose the number of epochs by the log loss on days 16 to 23 (features as at day
 16), and the architecture by NDCG@10 on the validation week. Test week: retrain on
 days 9 to 23 and test once on days 23 to 30, with features as at day 23.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 11 minutes):
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 10 minutes):
     python chapter_07/heavy_ranking.py
 """
 import os
@@ -47,7 +47,7 @@ POOL = 500
 EPOCHS = (1, 2, 3, 4, 5, 6)
 # The ranker chosen on the validation week by the main block below (which checks that it
 # picks this one). The other Chapter 7 scripts import it.
-SHIP = {"arch": "mlp, no ids", "epochs": 6}
+SHIP = {"arch": "mlp", "epochs": 1}
 
 
 def rows_for(events, served, users, items, weeks):
@@ -85,16 +85,19 @@ def full_order(top, chain):
     return out
 
 
-def epoch_losses(meta, arch, b_tr, R_tr, b_va, R_va, seed=0):
-    """Train for up to max(EPOCHS) epochs; after each, the validation log loss of
-    the click head (all rows, true slot) plus the play head (clicked rows)."""
-    model = Ranker(meta, arch)
+def epoch_losses(meta, arch, b_tr, R_tr, b_va, R_va, seed=0, item_table=None):
+    """Train for max(EPOCHS) epochs with one optimiser; after each epoch, the
+    validation log loss of the click head (all rows, true slot) plus the play head
+    (clicked rows). The model after epoch e is the one train(epochs=e) returns."""
+    model = Ranker(meta, arch, item_table=item_table, seed=seed)
     out = []
-    for _ in EPOCHS:
-        train(model, b_tr, R_tr, epochs=1, seed=seed + len(out))
+
+    def check(e):
         pc, pp = predict(model, b_va, len(R_va["click"]), position=torch.as_tensor(R_va["position"]))
         c = R_va["click"]
         out.append(log_loss(pc, c) + log_loss(pp[c], R_va["play"][c]))
+
+    train(model, b_tr, R_tr, epochs=max(EPOCHS), seed=seed, after_epoch=check)
     return out, model
 
 
@@ -104,7 +107,7 @@ if __name__ == "__main__":
     users, items, served, events, orders, truth = build(cfg)
     n_users, n_items = cfg.num_users, cfg.num_items
     video = ~items["is_product"]
-    snaps = {d: snapshot(events, users, items, d * DAY) for d in (9, 16, 23)}
+    snaps = {d: snapshot(events, served, users, items, d * DAY) for d in (9, 16, 23)}
     week1 = rows_for(events, served, users, items, [(9, 16)])
     weeks12 = rows_for(events, served, users, items, [(9, 16), (16, 23)])
     week2 = rows_for(events, served, users, items, [(16, 23)])
@@ -115,6 +118,15 @@ if __name__ == "__main__":
         print(f"  {name}: {len(R['click']):,} rows, {R['click'].sum():,} clicks ({R['click'].mean():.1%}), "
               f"{R['play'].sum():,} satisfied plays ({R['play'][R['click']].mean():.1%} of clicks), "
               f"{len(np.unique(R['user'])):,} users, {len(np.unique(R['item'])):,} videos")
+    print("  labels still on their way when the week closed (they count as 'did not happen' in training):")
+    for a, e in ((9, 16), (16, 23)):
+        now = impressions(events, served, users, items, a * DAY, e * DAY, e * DAY)
+        late = impressions(events, served, users, items, a * DAY, e * DAY, np.inf)   # everything that ever arrived
+        print(f"    days {a} to {e}: {len(late['click']) - len(now['click']):,} rows not yet in the training set, "
+              f"{late['click'].sum() - now['click'].sum():,} of {late['click'].sum():,} clicks "
+              f"({1 - now['click'].sum() / late['click'].sum():.1%}) and "
+              f"{late['play'].sum() - now['play'].sum():,} of {late['play'].sum():,} satisfied plays "
+              f"({1 - now['play'].sum() / late['play'].sum():.1%}) arrived after day {e}")
     b1 = tensors([snaps[9]], users, items, week1["user"], week1["item"], week1["snap"])
     b2 = tensors([snaps[16]], users, items, week2["user"], week2["item"], week2["snap"])
     b12 = tensors([snaps[9], snaps[16]], users, items, weeks12["user"], weeks12["item"], weeks12["snap"])
@@ -285,11 +297,14 @@ if __name__ == "__main__":
     # Each slot's click chance relative to slot 1: the model's (mean over held-out rows of
     # P(click | slot k) / P(click | slot 1)), the exploratory slots' (click rate of random
     # videos in slot k over slot 1, days 0 to 23), and the truth (P(look) = 1 / k ** 0.5)
-    ratio = []
-    p1 = predict(m, b3, len(c3), position=torch.ones(len(c3), dtype=torch.long))[0]
-    for k in range(1, 11):
-        pk = predict(m, b3, len(c3), position=torch.full((len(c3),), k, dtype=torch.long))[0]
-        ratio.append(float(np.mean(pk / p1)))
+    def tower_curve(model):
+        p1 = predict(model, b3, len(c3), position=torch.ones(len(c3), dtype=torch.long))[0]
+        return [float(np.mean(predict(model, b3, len(c3), position=torch.full((len(c3),), k, dtype=torch.long))[0]
+                              / p1)) for k in range(1, 11)]
+
+    ratio = tower_curve(m)
+    other = "mlp, no ids" if ship != "mlp, no ids" else "mlp"
+    ratio_other = tower_curve(models[other])
     early = impressions(events, served, users, items, 0, 23 * DAY, 23 * DAY)
     ex = early["explored"]
     ctr_k = np.array([early["click"][ex & (early["position"] == k)].mean() for k in range(1, 11)])
@@ -297,7 +312,8 @@ if __name__ == "__main__":
     true = 1 / np.arange(1, 11) ** cfg.look_decay
     print("  click chance relative to slot 1")
     print("  slot:                       " + "".join(f"{k:>7}" for k in range(1, 11)))
-    print("  learned tower               " + "".join(f"{x:>7.3f}" for x in ratio))
+    print(f"  learned tower ({ship})" .ljust(30) + "".join(f"{x:>7.3f}" for x in ratio))
+    print(f"  learned tower ({other})".ljust(30) + "".join(f"{x:>7.3f}" for x in ratio_other))
     print("  exploratory slots, days 0-23" + "".join(f"{x:>7.3f}" for x in ctr_k / ctr_k[0]))
     print("  truth, 1 / slot ** 0.5      " + "".join(f"{x:>7.3f}" for x in true))
     print(f"  exploratory rows per slot: {min(n_k):,} to {max(n_k):,}")

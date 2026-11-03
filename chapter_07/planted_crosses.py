@@ -17,6 +17,13 @@ Every model sees the same raw inputs (six ids and log length) and no hand-made
 cross-feature. The number of epochs is chosen on a validation set. The measure is
 the test log loss above the truth's own log loss (0 would be perfect).
 
+The last model is a two-tower model: a request tower (app language, network,
+phone tier, taste group) and a video tower (video language, category, length)
+joined only by a dot product. Every planted effect is a product of a request
+quantity and a video quantity, so a dot product can represent all of them: the
+experiment compares models that learn interactions with an additive one, not
+retrieval with ranking.
+
 Needs Python 3.12 or later and PyTorch. Run from the repository root (about three minutes):
     python chapter_07/planted_crosses.py
 """
@@ -39,6 +46,8 @@ from metrics import log_loss  # noqa: E402
 
 FIELDS = {"app language": 6, "video language": 6, "network": 4, "phone tier": 3, "taste group": 8, "category": 8}
 SLOW = np.array([1.0, 0.6, 0.2, 0.0])          # 2G, 3G, 4G, wifi
+REQUEST = [0, 2, 3, 4]                         # app language, network, phone tier, taste group
+VIDEO = [1, 5]                                 # video language, category (plus log length)
 D = 8                                          # id vector length
 
 
@@ -75,6 +84,10 @@ class Model(nn.Module):
         elif kind == "dcnv2":
             self.cross = nn.ModuleList([CrossLayer(width) for _ in range(2)])
             self.net = nn.Sequential(mlp([width, 64, 64]), nn.Linear(64, 1))
+        elif kind == "two-tower":                          # request side and video side never meet before the dot
+            self.request = nn.Sequential(mlp([len(REQUEST) * D, 64]), nn.Linear(64, 16))
+            self.video = nn.Sequential(mlp([len(VIDEO) * D + 1, 64]), nn.Linear(64, 16))
+            self.bias = nn.Parameter(torch.zeros(()))
         self.w_dense = nn.Linear(1, 1)
         for t in list(self.emb) + list(self.first):
             nn.init.normal_(t.weight, 0.0, 0.05)              # small starting vectors, as in rankers.py
@@ -85,6 +98,10 @@ class Model(nn.Module):
         if self.kind == "logistic":
             return linear
         V = torch.stack([t(X[:, k]) for k, t in enumerate(self.emb)], dim=1)
+        if self.kind == "two-tower":
+            u = self.request(V[:, REQUEST].flatten(1))
+            v = self.video(torch.cat([V[:, VIDEO].flatten(1), x1], dim=1))
+            return (u * v).sum(1) + self.bias
         flat = torch.cat([V.flatten(1), x1], dim=1)
         if self.kind == "mlp":
             return self.net(flat)[:, 0]
@@ -144,7 +161,7 @@ if __name__ == "__main__":
     print(f"  {'':<10}" + "".join(f"{'trained on ' + f'{n:,}' + ' rows':>32}" for n in (20_000, 500_000)))
     print(f"  {'':<10}" + f"{'epochs':>8}{'loss above truth':>17}{'AUC':>7}" * 2)
     trained = {}
-    for kind in ("logistic", "mlp", "deepfm", "dlrm", "dcnv2"):
+    for kind in ("logistic", "mlp", "deepfm", "dlrm", "dcnv2", "two-tower"):
         line = f"  {kind:<10}"
         for n in (20_000, 500_000):
             model, ep = fit(kind, tuple(a[:n] for a in big[:3]), valid)
@@ -160,7 +177,7 @@ if __name__ == "__main__":
     net = rows[0][:, list(FIELDS).index("network")]
     logit = lambda p: np.log(p / (1 - p))                                    # noqa: E731
     print("\n  short minus long videos, mean logit (models trained on 500,000 rows):   on 2G   on wifi")
-    for kind in ("truth", "logistic", "mlp", "deepfm", "dlrm", "dcnv2"):
+    for kind in ("truth", "logistic", "mlp", "deepfm", "dlrm", "dcnv2", "two-tower"):
         p = rows[3] if kind == "truth" else predict(trained[kind], rows)      # the models trained on 500,000
         vals = [logit(p[short & (net == g)]).mean() - logit(p[long_ & (net == g)]).mean() for g in (0, 3)]
         print(f"  {kind:<68}{vals[0]:>8.2f}{vals[1]:>9.2f}")

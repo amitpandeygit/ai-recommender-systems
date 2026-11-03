@@ -7,11 +7,14 @@ that impression: a click, a completion, a like, the share of the video watched,
 and a satisfied play (a completion or a like, the goal of Chapter 5).
 
 Features are frozen in snapshots. A snapshot at day t holds only what was known
-at t (Chapter 2's prepare(): what had arrived, de-duplicated, with consent then
-and now). Rows from the week after t get the features of the snapshot at t, and
-their labels are those that had arrived by the end of that week. So no row sees
-the future, which is the job a point-in-time join does in a feature store
-(Chapter 28).
+at t: the implicit scores come from Chapter 2's prepare() (what had arrived,
+de-duplicated, with consent then and now), and the video statistics from the
+impression rows of the 30 days before t with the labels that had arrived by t.
+Rows from the week after t get the features of the snapshot at t, and their
+labels are those that had arrived by the end of that week. So no row sees the
+future, which is the job a point-in-time join does in a feature store
+(Chapter 28). An outcome still on its way at the cutoff counts as "did not
+happen"; heavy_ranking.py measures how often that occurs.
 
 Features of one (user, video) pair:
   dense  - iALS score (a cross-feature learned by Chapter 4's model), the video's
@@ -23,8 +26,9 @@ Features of one (user, video) pair:
            language, and the user's history as a list of video ids with weights
 
 There is no user-id feature: a user is their history (as in Chapter 6). When a
-user turns personalisation off, their history leaves the next snapshot, and
-nothing user-specific is left inside the model.
+user turns personalisation off, their history leaves the next snapshot and their
+rows leave the next training set. What their earlier rows already taught the
+shared weights stays until the model is retrained without them (section 7.1).
 
 Needs Python 3.12 or later. Imported by the other Chapter 7 scripts.
 """
@@ -41,7 +45,6 @@ for folder in ("chapter_02", "chapter_03", "chapter_04", "chapter_05", "chapter_
     sys.path.insert(0, str(ROOT / folder))
 from tesselo_shop import DAY, LANGUAGES, Config, build  # noqa: E402,F401
 from similarity_recs import MIN_BUYERS, NO, group_popularity, top_k_chain, user_item_scores  # noqa: E402,F401
-from implicit_scores import prepare  # noqa: E402
 from implicit_mf import eligible_and_scored, ials  # noqa: E402
 
 HISTORY = 50                 # the user's 50 highest-weighted videos represent them
@@ -50,17 +53,21 @@ DENSE = ["iALS score", "popularity (log)", "click rate (log)", "plays per click 
          "same language", "share of history in category", "history size (log)", "has history"]
 
 
-def snapshot(events, users, items, cutoff):
+def snapshot(events, served, users, items, cutoff, window_days=30):
     """Everything the ranking stages may use at `cutoff`: implicit scores, iALS
-    vectors, item statistics and each user's history, all from data known then."""
+    vectors, video statistics and each user's history, all from data known then.
+    The video statistics count the same kind of row the ranker trains on (an
+    impression on screen or clicked, in the last 30 days, with the labels that had
+    arrived): views are those rows, clicks and satisfied plays are counted once per
+    row, so a video both completed and liked is one play."""
     n_users, n_items = len(users["vec"]), len(items["vec"])
     video = ~items["is_product"]
     weight, used = user_item_scores(events, users, cutoff, n_users, n_items)
     X, Y = ials(weight, 16, 1.0, 10.0)                          # Chapter 4's settings
-    d = prepare(events, users, cutoff)
-    count = lambda name: np.bincount(d["item"][d["event"] == name], minlength=n_items).astype(float)  # noqa: E731
-    views, clicks = count("viewable"), count("click")
-    plays = np.bincount(d["item"][np.isin(d["event"], ["complete", "like"])], minlength=n_items).astype(float)
+    r = impressions(events, served, users, items, cutoff - window_days * DAY, cutoff, cutoff)
+    views = np.bincount(r["item"], minlength=n_items).astype(float)
+    clicks = np.bincount(r["item"], weights=r["click"].astype(float), minlength=n_items)
+    plays = np.bincount(r["item"], weights=r["play"].astype(float), minlength=n_items)
     ctr = (clicks + PRIOR * clicks.sum() / views.sum()) / (views + PRIOR)
     ppc = (plays + PRIOR * plays.sum() / clicks.sum()) / (clicks + PRIOR)
     engaged = (weight > 0).sum(axis=0)

@@ -15,7 +15,7 @@ each table is then trained from three seeds, because with this little data the
 seed moves the online result more than most of the differences between tables.
 The script then prints the memory a table needs at production scale.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about five minutes):
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about four minutes):
     python chapter_07/embedding_tables.py
 """
 import os
@@ -34,9 +34,8 @@ sys.path.insert(0, str(HERE))
 from ranking_data import DAY, Config, build, candidate_pools, snapshot  # noqa: E402
 from rankers import (DIM, ItemTable, Ranker, hash_rows, meta_for, predict, rerank,  # noqa: E402
                      score_pools, tensors, train)
-from heavy_ranking import EPOCHS, POOL, impression_auc, rows_for  # noqa: E402
+from heavy_ranking import EPOCHS, POOL, epoch_losses, impression_auc, rows_for  # noqa: E402
 from evaluate import expected_outcomes  # noqa: E402
-from metrics import log_loss  # noqa: E402
 
 RARE = 20
 
@@ -70,7 +69,7 @@ if __name__ == "__main__":
     users, items, served, events, orders, truth = build(cfg)
     n_items = cfg.num_items
     video_ids = np.flatnonzero(~items["is_product"])
-    snaps = {d: snapshot(events, users, items, d * DAY) for d in (9, 16, 23)}
+    snaps = {d: snapshot(events, served, users, items, d * DAY) for d in (9, 16, 23)}
     week1 = rows_for(events, served, users, items, [(9, 16)])
     week2 = rows_for(events, served, users, items, [(16, 23)])
     weeks12 = rows_for(events, served, users, items, [(9, 16), (16, 23)])
@@ -97,13 +96,7 @@ if __name__ == "__main__":
     for name in tables(n_items, count12):
         torch.manual_seed(0)
         t1 = None if name == "full" else tables(n_items, count1)[name]()
-        model1 = Ranker(meta1, "dlrm", item_table=t1)           # "full" is exactly section 7.4's DLRM
-        losses = []
-        for e in EPOCHS:                                          # one epoch at a time, as epoch_losses() does
-            train(model1, b1, week1, epochs=1, seed=len(losses))
-            pc, pp = predict(model1, b2, len(week2["click"]), position=torch.as_tensor(week2["position"]))
-            c = week2["click"]
-            losses.append(log_loss(pc, c) + log_loss(pp[c], week2["play"][c]))
+        losses, _ = epoch_losses(meta1, "dlrm", b1, week1, b2, week2, item_table=t1)  # "full" = section 7.4's DLRM
         ep = EPOCHS[int(np.argmin(np.round(losses, 9)))]
         online, auc_c = [], []
         for seed in (0, 1, 2):
@@ -128,8 +121,9 @@ if __name__ == "__main__":
     print(f"\nA table of {n:,} ids with {dim} numbers each:")
     for label, size in (("32-bit floats", 4), ("16-bit floats", 2), ("8-bit integers", 1)):
         print(f"  {label:<15} {n * dim * size / 1e9:>6.0f} GB")
-    print(f"  training with Adam keeps two more numbers per weight, in 32-bit floats: "
-          f"{n * dim * 4 * 3 / 1e9:.0f} GB in all for a 32-bit table")
+    print(f"  training with Adam: the weights and Adam's two stored numbers per weight, all 32-bit, "
+          f"{n * dim * 4 * 3 / 1e9:.0f} GB that persist; a full 32-bit gradient adds {n * dim * 4 / 1e9:.0f} GB "
+          f"during each step, {n * dim * 4 * 4 / 1e9:,.0f} GB in all (sparse updates touch only the rows in a batch)")
     r = math.isqrt(n - 1) + 1
     print(f"  the QR trick with a remainder table of {r:,} rows: {r:,} + {-(-n // r):,} rows, "
           f"{(r + -(-n // r)) * dim * 4 / 1e6:.0f} MB")

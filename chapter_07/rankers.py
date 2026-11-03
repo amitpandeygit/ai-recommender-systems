@@ -92,14 +92,15 @@ class Inputs(nn.Module):
     """The six vectors of a (user, video) pair, and the standardised dense features.
     The user vector is the weighted mean of their history videos' vectors, from the
     same table as the candidate video's vector."""
-    def __init__(self, meta, item_table=None):
+    def __init__(self, meta, item_table=None, vectors=True):
         super().__init__()
-        self.item = item_table or ItemTable(meta["n_items"], DIM)
-        self.creator = nn.Embedding(meta["n_creators"], DIM)
-        self.category = nn.Embedding(meta["n_categories"], DIM)
-        self.language = nn.Embedding(meta["n_languages"], DIM)      # one table for video and app language
-        for t in (self.creator, self.category, self.language):
-            nn.init.normal_(t.weight, 0.0, 0.05)
+        if vectors:                                              # a model without id vectors gets no tables
+            self.item = item_table or ItemTable(meta["n_items"], DIM)
+            self.creator = nn.Embedding(meta["n_creators"], DIM)
+            self.category = nn.Embedding(meta["n_categories"], DIM)
+            self.language = nn.Embedding(meta["n_languages"], DIM)  # one table for video and app language
+            for t in (self.creator, self.category, self.language):
+                nn.init.normal_(t.weight, 0.0, 0.05)
         self.register_buffer("mean", torch.as_tensor(meta["dense_mean"]))
         self.register_buffer("sd", torch.as_tensor(meta["dense_sd"]))
 
@@ -305,8 +306,8 @@ class Ranker(nn.Module):
     def __init__(self, meta, arch="dlrm", position=True, item_table=None, seed=0):
         super().__init__()
         torch.manual_seed(seed)                                  # the same starting weights on every run
-        self.inputs = Inputs(meta, item_table)
         self.body = PreRanker(meta) if arch == "pre-ranker" else ARCHITECTURES[arch](meta)
+        self.inputs = Inputs(meta, item_table, vectors=getattr(self.body, "uses_vectors", True))
         self.click = nn.Linear(self.body.out_dim, 1)
         self.play = nn.Linear(self.body.out_dim, 1)
         self.position = nn.Embedding(11, 1) if position else None
@@ -339,7 +340,7 @@ class Expert(nn.Module):
 
 class MultiTask(nn.Module):
     """Listing 7.4. Tasks: click (all rows), play and watch share (clicked rows).
-    Every model reads the shipped ranker's inputs, the eight dense features.
+    Every model reads the eight dense features only.
     shared: one bottom for every task. mmoe: n_experts experts, mixed by one
     softmax gate per task. ple: per level, shared experts plus experts owned by each
     task; a task's gate mixes its own and the shared ones (two levels)."""
@@ -349,7 +350,7 @@ class MultiTask(nn.Module):
         super().__init__()
         torch.manual_seed(seed)
         self.kind = kind
-        self.inputs = Inputs(meta)
+        self.inputs = Inputs(meta, vectors=False)
         width = len(DENSE)
         T = len(self.TASKS)
         if kind == "shared":
@@ -432,9 +433,12 @@ def take(b, idx):
     return out
 
 
-def train(model, b, labels, epochs=4, lr=2e-3, batch=1024, seed=0, tasks=("click", "play")):
+def train(model, b, labels, epochs=4, lr=2e-3, batch=1024, seed=0, tasks=("click", "play"), after_epoch=None):
     """Click loss on every row; play (and watch) loss only on clicked rows. `tasks`
-    names the losses used, so a model can be trained for one task alone."""
+    names the losses used, so a model can be trained for one task alone.
+    after_epoch(e), if given, is called after epoch e (1, 2, ...), so a validation
+    check sees exactly the model that `epochs=e` would return: one optimiser, with
+    its state, runs through all the epochs."""
     torch.manual_seed(seed)
     gen = torch.Generator().manual_seed(seed)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
@@ -442,7 +446,7 @@ def train(model, b, labels, epochs=4, lr=2e-3, batch=1024, seed=0, tasks=("click
     pos = torch.as_tensor(labels["position"])
     n = len(y["click"])
     model.train()
-    for _ in range(epochs):
+    for e in range(1, epochs + 1):
         perm = torch.randperm(n, generator=gen)
         for start in range(0, n, batch):
             idx = perm[start:start + batch]
@@ -460,6 +464,10 @@ def train(model, b, labels, epochs=4, lr=2e-3, batch=1024, seed=0, tasks=("click
             opt.zero_grad()
             loss.backward()
             opt.step()
+        if after_epoch is not None:
+            model.eval()
+            after_epoch(e)
+            model.train()
     model.eval()
     return model
 
