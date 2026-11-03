@@ -19,6 +19,9 @@ methods see exactly the same words.
 Needs Python 3.12 or later. Run from the repository root (under a minute):
     python chapter_06/late_interaction.py
 """
+import os
+for _name in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ[_name] = "2"              # NumPy's linear algebra: the same thread count on every run
 import sys
 from pathlib import Path
 

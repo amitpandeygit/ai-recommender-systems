@@ -17,6 +17,9 @@ vector_search.py runs this file itself, so readers type one command:
     python chapter_06/vector_search.py
 It can also be run alone, with the output file as its argument.
 """
+import os
+for _name in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ[_name] = "2"              # NumPy's linear algebra: the same thread count on every run
 import sys
 import time
 from pathlib import Path

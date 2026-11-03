@@ -19,6 +19,9 @@ test week, as everywhere in this book.
 Needs Python 3.12 or later. Run from the repository root (about five minutes):
     python chapter_06/retrieval_channels.py
 """
+import os
+for _name in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ[_name] = "2"              # NumPy's linear algebra: the same thread count on every run
 import sys
 from pathlib import Path
 

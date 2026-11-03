@@ -23,6 +23,9 @@ this file runs in a separate process first (see that file for why).
 Needs Python 3.12 or later. Run from the repository root (about 15 minutes on a two-core machine):
     python chapter_06/vector_search.py
 """
+import os
+for _name in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ[_name] = "2"              # NumPy's linear algebra: the same thread count on every run
 import subprocess
 import sys
 import tempfile
