@@ -28,7 +28,9 @@ loss for the shipped ranker is chosen by validation NDCG@10 (Chapter 5's rule).
 Each model is retrained on days 9 to 23 from seeds 0, 1 and 2 and orders the same
 50 candidates the shipped pre-ranker keeps.
 
-Needs Python 3.12 or later, PyTorch and LightGBM. Run from the repository root (about three minutes):
+Needs Python 3.12 or later, PyTorch and LightGBM (on a Mac, LightGBM uses the OpenMP library
+that comes with PyTorch; if LightGBM still cannot load, only LambdaMART is skipped). Run from the
+repository root (about three minutes):
     python chapter_08/learning_to_rank.py
 """
 import os
@@ -38,10 +40,22 @@ import sys
 import time
 from pathlib import Path
 
-import lightgbm as lgb
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+if sys.platform == "darwin":
+    # LightGBM's Mac wheel needs an OpenMP runtime (libomp.dylib) and looks for it only in
+    # Homebrew's and MacPorts' folders. PyTorch's Mac wheel ships its own copy, so load that
+    # one first and LightGBM uses it: nothing else to install.
+    import ctypes
+    _omp = Path(torch.__file__).parent / "lib" / "libomp.dylib"
+    if _omp.exists():
+        ctypes.CDLL(str(_omp), mode=ctypes.RTLD_GLOBAL)
+try:
+    import lightgbm as lgb
+except OSError as _err:                  # LightGBM is there but cannot load: skip LambdaMART only
+    lgb, LGB_ERROR = None, str(_err).splitlines()[0]
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -297,17 +311,20 @@ if __name__ == "__main__":
         nd = ndcg10(top, val)
         chosen[kind], val_nd[kind] = ep, nd
         print(f"  {kind:<24}" + "".join(f"{x:>10.4f}" for x in losses) + f"{ep:>8}{nd:>9.4f}")
-    Xv, yv, gv = lgb_data(val["snaps"], users, items, val["R"], Gv)
-    Xh, yh, gh = lgb_data([W["snaps"][16]], users, items, Rh, Gh)
-    dv = lgb.Dataset(Xv, yv, group=gv)
-    booster = lgb.train(lgb_params(0), dv, num_boost_round=1_000, valid_sets=[lgb.Dataset(Xh, yh, group=gh)],
-                        callbacks=[lgb.early_stopping(50, verbose=False)])
-    rounds = booster.best_iteration
-    top = order_by(val["kept_rows"], lgb_scores(booster, val["S"], users, items, val["rows"], val["kept_rows"]))
-    nd = ndcg10(top, val)
-    chosen["LambdaMART"], val_nd["LambdaMART"] = rounds, nd
-    print(f"  {'LambdaMART':<24}{'(trees chosen by early stopping on held-out slates: ' + str(rounds) + ')':<48}"
-          f"{nd:>9.4f}")
+    if lgb is None:
+        print(f"  LambdaMART skipped: LightGBM could not load ({LGB_ERROR})")
+    else:
+        Xv, yv, gv = lgb_data(val["snaps"], users, items, val["R"], Gv)
+        Xh, yh, gh = lgb_data([W["snaps"][16]], users, items, Rh, Gh)
+        dv = lgb.Dataset(Xv, yv, group=gv)
+        booster = lgb.train(lgb_params(0), dv, num_boost_round=1_000, valid_sets=[lgb.Dataset(Xh, yh, group=gh)],
+                            callbacks=[lgb.early_stopping(50, verbose=False)])
+        rounds = booster.best_iteration
+        top = order_by(val["kept_rows"], lgb_scores(booster, val["S"], users, items, val["rows"], val["kept_rows"]))
+        nd = ndcg10(top, val)
+        chosen["LambdaMART"], val_nd["LambdaMART"] = rounds, nd
+        print(f"  {'LambdaMART':<24}{'(trees chosen by early stopping on held-out slates: ' + str(rounds) + ')':<48}"
+              f"{nd:>9.4f}")
     best = max(val_nd, key=lambda k: round(val_nd[k], 9))
     print(f"Chosen by validation NDCG@10: {best}   [{time.time() - t0:.0f} s]")
 
@@ -323,7 +340,7 @@ if __name__ == "__main__":
     print(f"  {'':<24}{'slate NDCG':>11}{'NDCG@10':>9}{'coverage':>9}{'top-10% cr.':>12}   online, seeds 0, 1, 2"
           f"      mean   against  s.e. seeds  s.e. users")
     base_runs = None
-    for kind in ("pointwise, two heads",) + LOSSES + ("LambdaMART",):
+    for kind in ("pointwise, two heads",) + LOSSES + (("LambdaMART",) if lgb is not None else ()):
         onl, first = [], None
         for seed in SEEDS:
             t_ = time.time()

@@ -42,10 +42,10 @@ pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt -c constraints.txt
 ```
 
-On macOS, LightGBM needs the OpenMP runtime, which macOS does not include. Without it, `chapter_08/learning_to_rank.py` stops at `import lightgbm` with `Library not loaded: @rpath/libomp.dylib`. Install it once with Homebrew, as LightGBM's installation guide says:
+On macOS, LightGBM needs an OpenMP runtime (`libomp.dylib`), which macOS does not include, and its wheel looks for one only in Homebrew's and MacPorts' folders. You do not need either: PyTorch's macOS wheel ships its own `libomp.dylib`, and `chapter_08/learning_to_rank.py` loads that copy before it imports LightGBM. If LightGBM still cannot load, the script skips only LambdaMART and says so. To check your setup on its own:
 
 ```bash
-brew install libomp
+python -c "import ctypes, os, torch; ctypes.CDLL(os.path.join(os.path.dirname(torch.__file__), 'lib', 'libomp.dylib'), mode=ctypes.RTLD_GLOBAL); import lightgbm; print('ok', lightgbm.__version__)"
 ```
 
 Chapter 6's to Chapter 8's run times were measured on a two-core cloud machine (Intel Xeon at 2.10 GHz), and the numbers printed in the book are one reference run on that machine. On one machine the scripts repeat exactly, apart from timings: every random draw is seeded, and the scripts fix their thread counts (two for PyTorch and for NumPy's linear algebra, one for Faiss). Across machines, results can move, because processors and library builds add up floating-point numbers in different orders: PyTorch does not promise identical training on different platforms, and Faiss documents that its matrix operations are implemented differently on different processors, so they need not match exactly even on one thread. The results affected are those that depend on a trained two-tower model or, in Chapters 7 and 8, a trained ranker, including the order of methods within one language, and the index recall of `vector_search.py`. Two external runs with the pinned versions (the first on an Apple Silicon Mac) gave, for example, hit@10 0.189 instead of 0.192, HNSW recall@10 0.883 instead of 0.900, and IVF-PQ recall@10 0.568 instead of 0.604 at nprobe 16. These are observed differences, not limits; another machine could differ by more. In the runs checked, none of the chapter's conclusions changed. The chapter gives standard errors for its close comparisons; read those before reading a small difference.
