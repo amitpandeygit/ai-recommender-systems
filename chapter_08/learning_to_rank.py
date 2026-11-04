@@ -28,9 +28,10 @@ loss for the shipped ranker is chosen by validation NDCG@10 (Chapter 5's rule).
 Each model is retrained on days 9 to 23 from seeds 0, 1 and 2 and orders the same
 50 candidates the shipped pre-ranker keeps.
 
-Needs Python 3.12 or later, PyTorch and LightGBM (on a Mac, LightGBM uses the OpenMP library
-that comes with PyTorch; if LightGBM still cannot load, only LambdaMART is skipped). Run from the
-repository root (about three minutes):
+Needs Python 3.12 or later, PyTorch and LightGBM. On a Mac, if LightGBM cannot find its OpenMP
+library, the script restarts once with PyTorch's copy on the library search path; if LightGBM
+still cannot load, only LambdaMART is skipped (see the README). Run from the repository root
+(about three minutes):
     python chapter_08/learning_to_rank.py
 """
 import os
@@ -44,18 +45,21 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-if sys.platform == "darwin":
-    # LightGBM's Mac wheel needs an OpenMP runtime (libomp.dylib) and looks for it only in
-    # Homebrew's and MacPorts' folders. PyTorch's Mac wheel ships its own copy, so load that
-    # one first and LightGBM uses it: nothing else to install.
-    import ctypes
-    _omp = Path(torch.__file__).parent / "lib" / "libomp.dylib"
-    if _omp.exists():
-        ctypes.CDLL(str(_omp), mode=ctypes.RTLD_GLOBAL)
 try:
     import lightgbm as lgb
-except OSError as _err:                  # LightGBM is there but cannot load: skip LambdaMART only
-    lgb, LGB_ERROR = None, str(_err).splitlines()[0]
+except OSError as _err:                  # LightGBM is installed but cannot load its OpenMP library
+    # LightGBM's Mac wheel looks for libomp.dylib only in Homebrew's and MacPorts' folders.
+    # PyTorch's Mac wheel ships its own copy, so restart once with PyTorch's library folder on
+    # the search path (macOS reads DYLD_LIBRARY_PATH only when a program starts).
+    _lib = str(Path(torch.__file__).parent / "lib")
+    if sys.platform == "darwin" and not os.environ.get("TESSELO_LIBOMP_RETRY"):
+        os.environ["TESSELO_LIBOMP_RETRY"] = "1"
+        os.environ["DYLD_LIBRARY_PATH"] = os.pathsep.join(
+            x for x in (_lib, os.environ.get("DYLD_LIBRARY_PATH")) if x)
+        print(f"LightGBM could not load libomp.dylib; restarting once with {_lib} on DYLD_LIBRARY_PATH",
+              file=sys.stderr, flush=True)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    lgb, LGB_ERROR = None, str(_err).splitlines()[0]   # still no luck: skip LambdaMART only
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -312,7 +316,8 @@ if __name__ == "__main__":
         chosen[kind], val_nd[kind] = ep, nd
         print(f"  {kind:<24}" + "".join(f"{x:>10.4f}" for x in losses) + f"{ep:>8}{nd:>9.4f}")
     if lgb is None:
-        print(f"  LambdaMART skipped: LightGBM could not load ({LGB_ERROR})")
+        print(f"  LambdaMART skipped: LightGBM could not load ({LGB_ERROR}). This run leaves out "
+              f"LambdaMART's rows in both tables; the README shows how to run it on a Mac.")
     else:
         Xv, yv, gv = lgb_data(val["snaps"], users, items, val["R"], Gv)
         Xh, yh, gh = lgb_data([W["snaps"][16]], users, items, Rh, Gh)

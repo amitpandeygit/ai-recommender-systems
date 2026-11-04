@@ -71,14 +71,15 @@ def filtered_kept(sp, W, rs, who):
 
 
 def builder(kept, score, items, S, method=None, x=None):
-    """The organic part of the row: a function of the creator rule (allowed) that
-    picks videos in slot order, by score order, MMR or the whole-row builder."""
+    """The organic part of the row: a function of the creator rule (allowed) and of the
+    reserved videos above each pick (above) that picks videos in slot order, by score
+    order, MMR or the whole-row builder; the variety builders count the reserved videos."""
     rel = np.where(kept >= 0, score, -np.inf)
     if method == "MMR":
-        return lambda allowed: mmr(kept, rel, S["Y"], x, allowed=allowed)
+        return lambda allowed, above: mmr(kept, rel, S["Y"], x, allowed=allowed, above=above)
     if method == "whole row":
-        return lambda allowed: whole_row(kept, rel, items["category"], x, allowed=allowed)
-    return lambda allowed: score_order(kept, rel, allowed)
+        return lambda allowed, above: whole_row(kept, rel, items["category"], x, allowed=allowed, above=above)
+    return lambda allowed, above: score_order(kept, rel, allowed)
 
 
 if __name__ == "__main__":

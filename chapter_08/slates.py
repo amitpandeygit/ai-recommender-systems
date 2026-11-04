@@ -52,51 +52,61 @@ EXCHANGE = (0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.3)
 
 
 def greedy(kept, rel, step_score, k=ROW, allowed=None):
-    """Pick k videos one at a time; step_score(chosen) gives each candidate's value
-    given what is already in the row, and allowed(chosen), if given, which candidates
-    a rule still permits (section 8.7's creator limit)."""
+    """Pick k videos one at a time; step_score(chosen, p) gives each candidate's value
+    as pick p, given what is already in the row, and allowed(chosen), if given, which
+    candidates a rule still permits (section 8.7's creator limit)."""
     n, m = kept.shape
     chosen = np.zeros((n, m), dtype=bool)
     out = np.full((n, k), -1)
     rows = np.arange(n)
-    for slot in range(k):
+    for p in range(k):
         ok = (kept >= 0) & ~chosen & np.isfinite(rel) & (True if allowed is None else allowed(chosen))
-        s = np.where(ok, step_score(chosen), -np.inf)
+        s = np.where(ok, step_score(chosen, p), -np.inf)
         best = np.argmax(s, axis=1)
         ok = np.isfinite(s[rows, best])
-        out[ok, slot] = kept[rows[ok], best[ok]]
+        out[ok, p] = kept[rows[ok], best[ok]]
         chosen[rows[ok], best[ok]] = True
     return out
 
 
-def mmr(kept, rel, vec, lam, k=ROW, allowed=None):
+def mmr(kept, rel, vec, lam, k=ROW, allowed=None, above=None):
     """Listing 8.5. Maximal marginal relevance over each user's kept candidates.
-    Relevance is the heavy ranker's score divided by the user's highest one."""
+    Relevance is the heavy ranker's score divided by the user's highest one. above
+    (users x k x m, -1 for none) holds the reserved videos already above pick p."""
     r = rel / np.max(np.where(np.isfinite(rel), rel, -np.inf), axis=1, keepdims=True)
-    v = vec[np.maximum(kept, 0)]
-    v = v / np.maximum(np.linalg.norm(v, axis=2, keepdims=True), 1e-12)
+    unit = lambda x: x / np.maximum(np.linalg.norm(x, axis=-1, keepdims=True), 1e-12)   # noqa: E731
+    v = unit(vec[np.maximum(kept, 0)])
     sim = np.einsum("nad,nbd->nab", v, v)                         # cosine between candidates
+    res = np.full((len(kept), k, kept.shape[1]), -np.inf)         # highest cosine to a reserved video above
+    if above is not None:
+        s = np.einsum("nad,npmd->npam", v, unit(vec[np.maximum(above, 0)]))
+        res = np.where(above[:, :, None, :] >= 0, s, -np.inf).max(axis=3)
 
-    def step(chosen):
-        most = np.where(chosen[:, None, :], sim, -np.inf).max(axis=2)
-        most = np.where(chosen.any(axis=1, keepdims=True), most, 0.0)   # the first pick has nothing to repeat
+    def step(chosen, p):
+        most = np.maximum(np.where(chosen[:, None, :], sim, -np.inf).max(axis=2), res[:, p])
+        most = np.where(np.isfinite(most), most, 0.0)             # nothing above yet: nothing to repeat
         return lam * r - (1 - lam) * most
     return greedy(kept, r, step, k, allowed)
 
 
-def whole_row(kept, rel, category, beta, k=ROW, allowed=None):
-    """A greedy builder for the row objective sum of relevance x beta ** repeats."""
+def whole_row(kept, rel, category, beta, k=ROW, allowed=None, above=None):
+    """A greedy builder for the row objective sum of relevance x beta ** repeats,
+    where a repeat is any video of the same category above, reserved ones included."""
     cat = category[np.maximum(kept, 0)]
+    res = np.zeros((len(kept), k, kept.shape[1]))                 # reserved videos of that category above
+    if above is not None:
+        ac = np.where(above >= 0, category[np.maximum(above, 0)], -1)
+        res = (cat[:, None, :, None] == ac[:, :, None, :]).sum(axis=3)
 
-    def step(chosen):
-        same = ((cat[:, :, None] == cat[:, None, :]) & chosen[:, None, :]).sum(axis=2)
+    def step(chosen, p):
+        same = ((cat[:, :, None] == cat[:, None, :]) & chosen[:, None, :]).sum(axis=2) + res[:, p]
         return rel * beta ** same
     return greedy(kept, rel, step, k, allowed)
 
 
-def score_order(kept, rel, allowed=None):
+def score_order(kept, rel, allowed=None, above=None):
     """The top 10 by score, among the candidates a rule allows."""
-    return greedy(kept, rel, lambda chosen: rel, ROW, allowed)
+    return greedy(kept, rel, lambda chosen, p: rel, ROW, allowed)
 
 
 def creator_cap(kept, creator, cap, placed):
@@ -116,9 +126,10 @@ def creator_cap(kept, creator, cap, placed):
 def assemble(kept, organic, items, cap, reserved=()):
     """Listing 8.6 (second part). The whole row at once. Each reserved item (a new
     video, an ad) takes its slot first: reserved holds (ids, slots) pairs, one id and
-    one slot per user, -1 or 0 for none. organic(allowed) then fills the other slots
-    in order, never giving a creator more than `cap` videos, the reserved videos
-    included. A slot stays empty (-1) if no allowed candidate is left."""
+    one slot per user, -1 or 0 for none. organic(allowed, above) then fills the other
+    slots in order, never giving a creator more than `cap` videos, the reserved videos
+    included; above tells it which reserved videos sit above each pick, so a variety
+    objective counts them. A slot stays empty (-1) if no allowed candidate is left."""
     n = len(kept)
     out = np.full((n, ROW), -1)
     placed = []
@@ -129,8 +140,13 @@ def assemble(kept, organic, items, cap, reserved=()):
         out[put, slots[put] - 1] = ids[put]
         placed.append(np.where(put & ~items["is_product"][np.maximum(ids, 0)], ids, -1))
     placed = np.stack(placed, axis=1) if placed else np.full((n, 1), -1)
-    org = organic(creator_cap(kept, items["creator"], cap, placed))
     free = out < 0
+    slot_of = np.argsort(~free, axis=1, kind="stable")             # pick p goes to the p-th free slot
+    slot_of = np.where(np.arange(ROW)[None, :] < free.sum(axis=1, keepdims=True), slot_of, ROW)
+    placed_slot = np.argmax(out[:, :, None] == placed[:, None, :], axis=1)   # where each reserved video sits
+    above = np.where((placed[:, None, :] >= 0) & (placed_slot[:, None, :] < slot_of[:, :, None]),
+                     placed[:, None, :], -1)                       # users x picks x reserved
+    org = organic(creator_cap(kept, items["creator"], cap, placed), above)
     rank = np.cumsum(free, axis=1) - 1                                  # the k-th free slot takes organic pick k
     out[free] = org[np.nonzero(free)[0], rank[free]]
     return out
@@ -287,7 +303,7 @@ def build(W, sp, who, method, x):
         return mmr(kept, rel, sp["S"]["Y"], x)
     if method == "whole row":
         return whole_row(kept, rel, items["category"], x)
-    return assemble(kept, lambda allowed: score_order(kept, rel, allowed), items, x)            # creator limit x
+    return assemble(kept, lambda allowed, above: score_order(kept, rel, allowed), items, x)     # creator limit x
 
 
 def choose_diversity(W, val, verbose=False):
@@ -389,7 +405,7 @@ if __name__ == "__main__":
     S = test["S"]
     new_a, new_ok = new_for_you(W, S, test["aud"], R)
     kept_a, rel_a = test["kept_aud"], np.where(test["kept_aud"] >= 0, test["heavy_aud"], -np.inf)
-    plain = lambda allowed: score_order(kept_a, rel_a, allowed)              # noqa: E731
+    plain = lambda allowed, above: score_order(kept_a, rel_a, allowed)       # noqa: E731
     print(f"  videos below the history threshold: {new_ok.sum():,} of {W['video'].sum():,}; users with a candidate: "
           f"{np.mean(new_a >= 0):.1%}")
     print(f"  {'':<28}{'online':>8}{'against':>17}{'from the new video':>20}{'new videos shown':>18}")
