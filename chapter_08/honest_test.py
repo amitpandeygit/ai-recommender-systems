@@ -11,15 +11,19 @@ consenting user on the test week:
   (two steps of A on their own, to show what each part costs: the filters only, then
    the filters and the new-video slot)
   B: ads where they pay          - A, but the ad goes to the slot of section 8.7's allocation rule
-                                   (or nowhere), with the exchange rate set so that the estimated ad
+                                   (any slot but the new video's, or nowhere), priced on the row it
+                                   changes, with the exchange rate set so that the estimated ad
                                    revenue equals A's (estimates only, no outcomes)
   C: a blended score             - A, with feature-weighted linear stacking (section 8.4) in place
                                    of the heavy ranker's score
   D: a varied row                - C, with the row built by the method and setting that section
                                    8.6's validation rule chose
-The settings are fixed before the run: the creator limit, the new-video slot and the
-ad slot are Tesselo's product rules, and every other choice comes from the
-validation week. Results are reported in Chapter 2's world and in section 8.6's
+Each row is assembled at once (slates.assemble): the new video and the ad take
+their slots first, then the organic videos fill the rest under the creator limit,
+which counts the new video; check_rows() confirms every rule. The settings are
+fixed before the run: the creator limit, the new-video slot and the ad slot are
+Tesselo's product rules, and every other choice comes from the validation week.
+Results are reported in Chapter 2's world and in section 8.6's
 planted boredom test, with Chapter 5's guardrails, for every app language.
 
 Needs Python 3.12 or later, PyTorch and pyroaring. Run from the repository root (about three minutes):
@@ -40,8 +44,8 @@ from slate_data import (KEPT, POOL, ROW, Ranker, paired, row_metrics, rules, sla
                         world)
 from filtering import RuleSets  # noqa: E402
 from hybrids import SECOND, blend_scores, fit_blends  # noqa: E402
-from slates import (ad_allocation, ad_setup, best_ads, choose_diversity, creator_limit, insert_at, look_curve,  # noqa: E402
-                    mmr, new_for_you, revenue, whole_row)
+from slates import (ad_allocation, ad_setup, assemble, best_ads, check_rows, choose_diversity,  # noqa: E402
+                    look_curve, mmr, new_for_you, revenue, row_scores, score_order, whole_row)
 from ranking_data import LANGUAGES, candidate_pools  # noqa: E402
 from pre_ranking import student_scores  # noqa: E402
 from rankers import score_pools  # noqa: E402
@@ -66,13 +70,15 @@ def filtered_kept(sp, W, rs, who):
     return np.where(np.take_along_axis(sc, keep, axis=1) > -np.inf, np.take_along_axis(pools, keep, axis=1), -1)
 
 
-def build_row(kept, score, items, S, method=None, x=None):
+def builder(kept, score, items, S, method=None, x=None):
+    """The organic part of the row: a function of the creator rule (allowed) that
+    picks videos in slot order, by score order, MMR or the whole-row builder."""
     rel = np.where(kept >= 0, score, -np.inf)
     if method == "MMR":
-        return mmr(kept, rel, S["Y"], x)
+        return lambda allowed: mmr(kept, rel, S["Y"], x, allowed=allowed)
     if method == "whole row":
-        return whole_row(kept, rel, items["category"], x)
-    return creator_limit(kept, rel, items["creator"], CREATOR_CAP)
+        return lambda allowed: whole_row(kept, rel, items["category"], x, allowed=allowed)
+    return lambda allowed: score_order(kept, rel, allowed)
 
 
 if __name__ == "__main__":
@@ -92,7 +98,7 @@ if __name__ == "__main__":
     print(f"Settings: creator limit {CREATOR_CAP}, new video at slot {NEW_SLOT}, ad at slot {AD_SLOT}; "
           f"validation choice for arm D: {method}, {setting}  [{time.time() - t0:.0f} s]")
 
-    rows = {}
+    rows, checks = {}, {}
     for who in ("aud", "rows"):                              # all consenting users first: arm B's rate
         r = test[who]
         kept = filtered_kept(test, W, rs, who)
@@ -102,35 +108,40 @@ if __name__ == "__main__":
         new, _ = new_for_you(W, S, r, R)
         ad2, val2 = best_ads(W, S, r, ads)
         ad, ad_value = ad2[:, 0], val2[:, 0]
-        base = insert_at(build_row(kept, heavy, items, S), new, NEW_SLOT)
-        A = insert_at(base, ad, AD_SLOT)
-        s_top = np.take_along_axis(np.where(kept >= 0, heavy, -np.inf),
-                                   np.argsort(-np.where(kept >= 0, heavy, -np.inf), axis=1, kind="stable")[:, :ROW],
-                                   axis=1)
-        s_top = np.where(np.isfinite(s_top), s_top, 0.0)
+        new_res = (new, NEW_SLOT)
+        organic = builder(kept, heavy, items, S)
+        only = assemble(kept, organic, items, CREATOR_CAP)
+        base = assemble(kept, organic, items, CREATOR_CAP, [new_res])
+        A = assemble(kept, organic, items, CREATOR_CAP, [new_res, (ad, AD_SLOT)])
+        s_row = row_scores(base, kept, np.where(kept >= 0, heavy, -np.inf))   # the row the ad would change
+        fixed = (np.arange(1, ROW + 1)[None, :] == NEW_SLOT) & (new >= 0)[:, None]
         if who == "aud":                                     # exchange rate: estimated revenue equal to A's
             est_a = (look[AD_SLOT - 1] * ad_value).mean()
-            grid = np.round(np.arange(0.10, 0.401, 0.005), 3)
+            grid = np.round(np.arange(0.10, 1.501, 0.005), 3)
             est = []
             for e in grid:
-                slot = ad_allocation(s_top, look, ad_value, e)
+                slot = ad_allocation(s_row, fixed, look, ad_value, e)
                 est.append(np.where(slot > 0, look[np.maximum(slot, 1) - 1] * ad_value, 0.0).mean())
             e_match = float(grid[int(np.argmin(np.abs(np.array(est) - est_a)))])
-        slot = ad_allocation(s_top, look, ad_value, e_match)
-        B = base.copy()
-        for k in range(1, ROW + 1):
-            m = (slot == k) & (ad >= 0)
-            B[m] = insert_at(B[m], ad[m], k)
-        Cb = insert_at(insert_at(build_row(kept, blend, items, S), new, NEW_SLOT), ad, AD_SLOT)
-        Dv = insert_at(insert_at(build_row(kept, blend, items, S, method, setting), new, NEW_SLOT), ad, AD_SLOT)
+        slot_b = ad_allocation(s_row, fixed, look, ad_value, e_match)
+        B = assemble(kept, organic, items, CREATOR_CAP, [new_res, (ad, slot_b)])
+        Cb = assemble(kept, builder(kept, blend, items, S), items, CREATOR_CAP, [new_res, (ad, AD_SLOT)])
+        Dv = assemble(kept, builder(kept, blend, items, S, method, setting), items, CREATOR_CAP,
+                      [new_res, (ad, AD_SLOT)])
+        checks[who] = {"A: the production row": check_rows(A, items, CREATOR_CAP, [new_res, (ad, AD_SLOT)]),
+                       "B: ads where they pay": check_rows(B, items, CREATOR_CAP, [new_res, (ad, slot_b)]),
+                       "C: a blended score": check_rows(Cb, items, CREATOR_CAP, [new_res, (ad, AD_SLOT)]),
+                       "D: a varied row": check_rows(Dv, items, CREATOR_CAP, [new_res, (ad, AD_SLOT)])}
         pools = candidate_pools(S, users, items, r, POOL)
         rows[who] = {"iALS, then popular in language": pools[:, :ROW],
                      "Chapter 7's shipped pipeline": np.take_along_axis(
                          test[f"kept_{who}"], np.argsort(-np.where(test[f"kept_{who}"] >= 0, test[f"heavy_{who}"],
                                                                    -np.inf), axis=1, kind="stable")[:, :ROW], axis=1),
-                     "filters only": build_row(kept, heavy, items, S), "filters and the new-video slot": base,
+                     "filters only": only, "filters and the new-video slot": base,
                      "A: the production row": A, "B: ads where they pay": B,
                      "C: a blended score": Cb, "D: a varied row": Dv}
+    print("Rule check on the rows of all consenting users (rows that break a rule, empty slots): "
+          + "; ".join(f"{k[0]} {v[0]}, {v[1]}" for k, v in checks["aud"].items()))
     print(f"Exchange rate for arm B: {e_match} (estimated revenue per row equal to arm A's, "
           f"{(look[AD_SLOT - 1] * best_ads(W, S, test['aud'], ads)[1][:, 0]).mean():.4f} coins)  "
           f"[{time.time() - t0:.0f} s]")

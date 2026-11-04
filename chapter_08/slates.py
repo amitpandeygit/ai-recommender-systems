@@ -12,8 +12,12 @@ candidates the shipped pre-ranker keeps, in one of these ways:
   creator limit   - at most `cap` videos per creator
   new-video slot  - one slot holds the best "New for you" video (Chapter 6's source for
                     videos with too little history to be in the pool)
-  ad slots        - sponsored shop products at fixed slots, or at slot 3 only when the
-                    ad's expected revenue is worth the satisfied plays it pushes out
+  ad slots        - sponsored shop products at fixed slots, or at the slot where the ad's
+                    expected revenue is most worth the satisfied plays it pushes out, if any
+
+A row with rules is assembled at once (assemble): the reserved items take their
+slots first, then the chosen builder fills the other slots under the creator limit,
+and check_rows() confirms that every rule holds.
 
 Chapter 2's simulator scores every slot on its own, so a row of similar videos loses
 nothing there. Section 8.6's planted test (slate_data.BOREDOM) changes that one
@@ -38,23 +42,26 @@ sys.path.insert(0, str(HERE))
 from slate_data import (BOREDOM, DAY, KEPT, ROW, order_by, online, paired, row_metrics, rules, slate_outcomes,  # noqa: E402
                         split, world)
 from metrics import diversity, ndcg_at_k  # noqa: E402
-from ranking_data import PRIOR, impressions  # noqa: E402
+from ranking_data import PRIOR  # noqa: E402
 from implicit_scores import prepare  # noqa: E402
 from similarity_recs import NO, content_scores, item_features, top_k  # noqa: E402
 
 LAMBDAS = (1.0, 0.9, 0.8, 0.7, 0.6, 0.5)
 BETAS = (1.0, 0.9, 0.75, 0.5)
+EXCHANGE = (0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.3)
 
 
-def greedy(kept, rel, step_score, k=ROW):
-    """Pick k videos one at a time; step_score(rel, chosen_mask, picked_so_far) gives
-    each candidate's value given what is already in the row."""
+def greedy(kept, rel, step_score, k=ROW, allowed=None):
+    """Pick k videos one at a time; step_score(chosen) gives each candidate's value
+    given what is already in the row, and allowed(chosen), if given, which candidates
+    a rule still permits (section 8.7's creator limit)."""
     n, m = kept.shape
     chosen = np.zeros((n, m), dtype=bool)
     out = np.full((n, k), -1)
     rows = np.arange(n)
     for slot in range(k):
-        s = np.where((kept >= 0) & ~chosen & np.isfinite(rel), step_score(chosen), -np.inf)
+        ok = (kept >= 0) & ~chosen & np.isfinite(rel) & (True if allowed is None else allowed(chosen))
+        s = np.where(ok, step_score(chosen), -np.inf)
         best = np.argmax(s, axis=1)
         ok = np.isfinite(s[rows, best])
         out[ok, slot] = kept[rows[ok], best[ok]]
@@ -62,7 +69,7 @@ def greedy(kept, rel, step_score, k=ROW):
     return out
 
 
-def mmr(kept, rel, vec, lam, k=ROW):
+def mmr(kept, rel, vec, lam, k=ROW, allowed=None):
     """Listing 8.5. Maximal marginal relevance over each user's kept candidates.
     Relevance is the heavy ranker's score divided by the user's highest one."""
     r = rel / np.max(np.where(np.isfinite(rel), rel, -np.inf), axis=1, keepdims=True)
@@ -74,44 +81,109 @@ def mmr(kept, rel, vec, lam, k=ROW):
         most = np.where(chosen[:, None, :], sim, -np.inf).max(axis=2)
         most = np.where(chosen.any(axis=1, keepdims=True), most, 0.0)   # the first pick has nothing to repeat
         return lam * r - (1 - lam) * most
-    return greedy(kept, r, step, k)
+    return greedy(kept, r, step, k, allowed)
 
 
-def whole_row(kept, rel, category, beta, k=ROW):
+def whole_row(kept, rel, category, beta, k=ROW, allowed=None):
     """A greedy builder for the row objective sum of relevance x beta ** repeats."""
     cat = category[np.maximum(kept, 0)]
 
     def step(chosen):
         same = ((cat[:, :, None] == cat[:, None, :]) & chosen[:, None, :]).sum(axis=2)
         return rel * beta ** same
-    return greedy(kept, rel, step, k)
+    return greedy(kept, rel, step, k, allowed)
 
 
-def creator_limit(kept, rel, creator, cap, k=ROW):
-    """Listing 8.6 (first part). Score order, but at most `cap` videos per creator."""
+def score_order(kept, rel, allowed=None):
+    """The top 10 by score, among the candidates a rule allows."""
+    return greedy(kept, rel, lambda chosen: rel, ROW, allowed)
+
+
+def creator_cap(kept, creator, cap, placed):
+    """Listing 8.6 (first part). A rule for greedy(): a candidate is allowed while its
+    creator has fewer than `cap` videos in the row, counting the videos already placed
+    in reserved slots (placed: users x m video ids, -1 for none)."""
     cr = creator[np.maximum(kept, 0)]
+    pc = np.where(placed >= 0, creator[np.maximum(placed, 0)], -1)
+    fixed = (cr[:, :, None] == pc[:, None, :]).sum(axis=2)              # placed videos per candidate's creator
 
-    def step(chosen):
-        count = ((cr[:, :, None] == cr[:, None, :]) & chosen[:, None, :]).sum(axis=2)
-        return np.where(count < cap, rel, -np.inf)
-    return greedy(kept, rel, step, k)
+    def allowed(chosen):
+        count = ((cr[:, :, None] == cr[:, None, :]) & chosen[:, None, :]).sum(axis=2) + fixed
+        return count < cap
+    return allowed
 
 
-def insert_at(top, extra, slot):
-    """Listing 8.6 (second part). Put extra[u] at `slot` (1 to 10) of user u's row and
-    push the videos below it down one place; the last one leaves the row."""
-    out = top.copy()
-    has = extra >= 0
-    s = slot - 1
-    out[has, s + 1:] = top[has, s:-1]
-    out[has, s] = extra[has]
+def assemble(kept, organic, items, cap, reserved=()):
+    """Listing 8.6 (second part). The whole row at once. Each reserved item (a new
+    video, an ad) takes its slot first: reserved holds (ids, slots) pairs, one id and
+    one slot per user, -1 or 0 for none. organic(allowed) then fills the other slots
+    in order, never giving a creator more than `cap` videos, the reserved videos
+    included. A slot stays empty (-1) if no allowed candidate is left."""
+    n = len(kept)
+    out = np.full((n, ROW), -1)
+    placed = []
+    for ids, slots in reserved:
+        slots = np.broadcast_to(np.asarray(slots), (n,))
+        put = (ids >= 0) & (slots > 0)
+        assert not (out[put, slots[put] - 1] >= 0).any(), "two reserved items in one slot"
+        out[put, slots[put] - 1] = ids[put]
+        placed.append(np.where(put & ~items["is_product"][np.maximum(ids, 0)], ids, -1))
+    placed = np.stack(placed, axis=1) if placed else np.full((n, 1), -1)
+    org = organic(creator_cap(kept, items["creator"], cap, placed))
+    free = out < 0
+    rank = np.cumsum(free, axis=1) - 1                                  # the k-th free slot takes organic pick k
+    out[free] = org[np.nonzero(free)[0], rank[free]]
     return out
 
 
+def check_rows(top, items, cap, reserved=()):
+    """Section 8.7's final check: rows that break a rule (a creator over the cap, a
+    reserved item not in its slot, a video twice), and the number of empty slots."""
+    n = len(top)
+    bad = np.zeros(n, dtype=bool)
+    video = (top >= 0) & ~items["is_product"][np.maximum(top, 0)]
+    cr = np.where(video, items["creator"][np.maximum(top, 0)], -1)
+    for k in range(n):
+        c = cr[k][cr[k] >= 0]
+        t = top[k][top[k] >= 0]
+        bad[k] = (np.unique(c, return_counts=True)[1] > cap).any() or len(np.unique(t)) < len(t)
+    for ids, slots in reserved:
+        slots = np.broadcast_to(np.asarray(slots), (n,))
+        put = (ids >= 0) & (slots > 0)
+        bad[put] |= top[put, slots[put] - 1] != ids[put]
+    return int(bad.sum()), int((top < 0).sum())
+
+
+def row_scores(top, kept, rel):
+    """Each slot's score (rel of that video among the user's kept candidates), 0 for
+    a slot that holds no kept candidate."""
+    match = (top[:, :, None] == kept[:, None, :]) & (top[:, :, None] >= 0)
+    return (match * np.where(np.isfinite(rel), rel, 0.0)[:, None, :]).sum(axis=2)
+
+
+def served_slots(W, start, end, label_cutoff, products=False):
+    """Every slot served in [start, end) to consenting, logged-in users, videos (or
+    products), whether or not the user ever scrolled to it, with its click label.
+    Counting all served slots, not only those on screen, keeps the chance of reaching
+    a slot in the click rate."""
+    served, events, users, items = W["served"], W["events"], W["users"], W["items"]
+    s_user = served["user_id"]
+    kind = items["is_product"] if products else ~items["is_product"]
+    keep = ((served["served_time"] >= start) & (served["served_time"] < end) & (s_user >= 0)
+            & served["consent_at_time"] & users["current_consent"][np.maximum(s_user, 0)] & kind[served["item_id"]])
+    clicked = (events["event"] == "click") & (events["impression_id"] >= 0) & (events["server_time"] < label_cutoff)
+    click = np.zeros(len(s_user), dtype=bool)
+    click[events["impression_id"][clicked]] = True
+    rows = np.flatnonzero(keep)
+    return {"user": s_user[rows], "item": served["item_id"][rows], "position": served["position"][rows],
+            "click": click[rows], "explored": served["explored"][rows]}
+
+
 def look_curve(W):
-    """Each slot's click chance relative to slot 1, measured on exploratory slots
-    (random videos) of days 0 to 23: the system's own estimate of attention."""
-    early = impressions(W["events"], W["served"], W["users"], W["items"], 0, 23 * DAY, 23 * DAY)
+    """Each slot's attention relative to slot 1: clicks per served exploratory slot
+    (random videos) of days 0 to 23, the system's own estimate. It includes the
+    chance that the user scrolls that far."""
+    early = served_slots(W, 0, 23 * DAY, 23 * DAY)
     ex = early["explored"]
     ctr = np.array([early["click"][ex & (early["position"] == k)].mean() for k in range(1, ROW + 1)])
     return ctr / ctr[0]
@@ -120,18 +192,18 @@ def look_curve(W):
 def ad_setup(W, cfg, R, explored_only=True):
     """Sponsored products (20%, synthetic bids in coins per click) and Tesselo's ad
     click model: a logistic regression on the product's smoothed click rate (logit)
-    and the iALS score, with one term per slot. It is fitted on the product
-    impressions of days 9 to 23, each week with the features of the snapshot before
-    it; by default only on exploratory slots, where the product was drawn at random."""
-    items, users = W["items"], W["users"]
+    and the iALS score, with one term per slot. It is fitted on the served product
+    slots of days 9 to 23 (seen or not), each week with the features of the snapshot
+    before it; by default only on exploratory slots, where the product was drawn at
+    random. Its slot-1 prediction is P(click at slot 1)."""
+    items = W["items"]
     rng = np.random.default_rng(cfg.seed + 803)
     product = items["is_product"]
     sponsored = product & (rng.random(len(product)) < 0.20)
     bid = np.where(sponsored, rng.lognormal(0.0, 0.5, len(product)), 0.0)
-    flipped = dict(items, is_product=~product)                  # impressions() keeps videos; flipped, it keeps products
     Xs, ys = [], []
     for start, day in ((9, 9), (16, 16)):
-        P = impressions(W["events"], W["served"], users, flipped, start * DAY, (start + 7) * DAY, (start + 7) * DAY)
+        P = served_slots(W, start * DAY, (start + 7) * DAY, (start + 7) * DAY, products=True)
         keep = P["explored"] if explored_only else np.ones(len(P["item"]), dtype=bool)
         S = W["snaps"][day]
         u, i = P["user"][keep], P["item"][keep]
@@ -215,7 +287,7 @@ def build(W, sp, who, method, x):
         return mmr(kept, rel, sp["S"]["Y"], x)
     if method == "whole row":
         return whole_row(kept, rel, items["category"], x)
-    return creator_limit(kept, rel, items["creator"], x)
+    return assemble(kept, lambda allowed: score_order(kept, rel, allowed), items, x)            # creator limit x
 
 
 def choose_diversity(W, val, verbose=False):
@@ -246,17 +318,24 @@ def choose_diversity(W, val, verbose=False):
     return method, picks[method][0]
 
 
-def ad_allocation(s_top, look, value, e):
+def ad_allocation(s_row, fixed, look, value, e):
     """Listing 8.6 (third part). For each user, the slot k that maximises
-    e x (expected ad revenue at k) - (satisfied plays the ad pushes out), or no ad if
-    nothing is positive. Pushing out: every video from slot k down moves one slot
-    lower, so it loses (w_j - w_(j+1)) x its score, with w_11 = 0."""
+    e x (expected ad revenue at k) - (satisfied plays the ad pushes out), or no ad (0)
+    if nothing is positive. s_row holds the scores of the row without the ad, slot by
+    slot; fixed marks slots that never move (a reserved new video), and the ad cannot
+    take them. An ad at k moves every other video from slot k down to the next free
+    slot, so the video in slot j loses (w_j - w_next(j)) x its score; the last one
+    leaves the row (w = 0)."""
+    n = len(s_row)
     w = np.r_[look, 0.0]
-    drop = (w[:-1] - w[1:])[None, :] * s_top                     # loss of moving the video in slot j down one
-    loss = np.cumsum(drop[:, ::-1], axis=1)[:, ::-1]             # an ad at slot k moves slots k..10
-    gain = e * look[None, :] * value[:, None] - loss
+    nxt = np.full((n, ROW), ROW)                                 # where slot j's video moves (ROW: out)
+    for j in range(ROW - 2, -1, -1):
+        nxt[:, j] = np.where(fixed[:, j + 1], nxt[:, j + 1], j + 1)
+    drop = np.where(fixed, 0.0, (w[None, :ROW] - w[nxt]) * s_row)   # what slot j's video loses if it moves
+    loss = np.cumsum(drop[:, ::-1], axis=1)[:, ::-1]             # an ad at k moves slots k..10
+    gain = np.where(fixed, -np.inf, e * look[None, :] * value[:, None] - loss)
     best = np.argmax(gain, axis=1)
-    return np.where(gain[np.arange(len(gain)), best] > 0, best + 1, 0)   # 0: no ad
+    return np.where(gain[np.arange(n), best] > 0, best + 1, 0)
 
 
 def table_row(label, res, base=None, base_b=None, first=False):
@@ -309,14 +388,13 @@ if __name__ == "__main__":
     print("\nNew-video slot: the best 'New for you' video at one slot, the rest in score order")
     S = test["S"]
     new_a, new_ok = new_for_you(W, S, test["aud"], R)
-    new_r, _ = new_for_you(W, S, test["rows"], R)
-    top_a0 = order_by(test["kept_aud"], test["heavy_aud"])
-    top_r0 = order_by(test["kept_rows"], test["heavy_rows"])
+    kept_a, rel_a = test["kept_aud"], np.where(test["kept_aud"] >= 0, test["heavy_aud"], -np.inf)
+    plain = lambda allowed: score_order(kept_a, rel_a, allowed)              # noqa: E731
     print(f"  videos below the history threshold: {new_ok.sum():,} of {W['video'].sum():,}; users with a candidate: "
           f"{np.mean(new_a >= 0):.1%}")
     print(f"  {'':<28}{'online':>8}{'against':>17}{'from the new video':>20}{'new videos shown':>18}")
     for slot in (2, 4, 8):
-        ta = insert_at(top_a0, new_a, slot)
+        ta = assemble(kept_a, plain, items, ROW, [(new_a, slot)])
         on = online(ta, test["aud"], W)
         _, play = slate_outcomes(ta, test["aud"], users, items, cfg)
         from_new = play[:, slot - 1].mean()
@@ -327,45 +405,49 @@ if __name__ == "__main__":
     print("\nAd slots: sponsored products (synthetic bids), each user's in-stock ad with the highest estimated value")
     look = look_curve(W)
     ads = ad_setup(W, cfg, R)
-    print("  attention by slot, relative to slot 1, from exploratory slots: " + " ".join(f"{x:.3f}" for x in look))
+    print("  attention by slot, relative to slot 1, from served exploratory slots: "
+          + " ".join(f"{x:.3f}" for x in look))
     print(f"  sponsored products: {ads['sponsored'].sum():,}, in stock: {ads['ok'].sum():,}; bids: median "
           f"{np.median(ads['bid'][ads['sponsored']]):.2f} coins per click")
-    for label, only in (("every product impression", False), ("exploratory slots only", True)):
+    for label, only in (("every served product slot", False), ("exploratory slots only", True)):
         m = ad_setup(W, cfg, R, explored_only=only)
         t2, v2 = best_ads(W, S, test["aud"], m)
-        top = insert_at(order_by(test["kept_aud"], test["heavy_aud"]), t2[:, 0], 3)
+        top = assemble(kept_a, plain, items, ROW, [(t2[:, 0], 3)])
         print(f"  ad click model fitted on {label} ({m['rows']:,} rows, {m['clicks']:,} clicks): "
               f"{m['coef'][0]:+.3f} {m['coef'][1]:+.3f} x logit(click rate) {m['coef'][2]:+.3f} x iALS score; "
               f"an ad at slot 3: estimated revenue {(look[2] * v2[:, 0]).mean():.4f}, realised "
               f"{revenue(top, test['aud'], W, m['bid']).mean():.4f} coins per row")
+    rng = np.random.default_rng(cfg.seed + 804)                   # the same check for an ad drawn at random
+    lc = logit(product_ctr(W, 23))
+    c = ads["coef"]
+    rand_ad = np.array([rng.choice(np.flatnonzero(ads["ok"] & ~S["used"][u])) for u in test["aud"]])
+    z = c[0] + c[1] * lc[rand_ad] + c[2] * np.einsum("nk,nk->n", S["X"][test["aud"]], S["Y"][rand_ad])
+    est = look[2] * ads["bid"][rand_ad] / (1 + np.exp(-z))
+    real = revenue(assemble(kept_a, plain, items, ROW, [(rand_ad, 3)]), test["aud"], W, ads["bid"])
+    print(f"  the same model, a random in-stock ad at slot 3 for each user: estimated revenue {est.mean():.4f}, "
+          f"realised {real.mean():.4f} coins per row")
     two_ads, two_values = best_ads(W, S, test["aud"], ads)
     ad, ad_value = two_ads[:, 0], two_values[:, 0]
-    rel = order_by(test["kept_aud"], test["heavy_aud"])
-    s_top = np.take_along_axis(np.where(test["kept_aud"] >= 0, test["heavy_aud"], -np.inf),
-                               np.argsort(-np.where(test["kept_aud"] >= 0, test["heavy_aud"], -np.inf), axis=1,
-                                          kind="stable")[:, :ROW], axis=1)
-    s_top = np.where(np.isfinite(s_top), s_top, 0.0)
+    rel = assemble(kept_a, plain, items, ROW)
+    s_row = row_scores(rel, kept_a, rel_a)
+    no_fixed = np.zeros(rel.shape, dtype=bool)
     w = np.r_[look, 0.0]
-    loss3 = ((w[2:ROW] - w[3:])[None, :] * s_top[:, 2:]).sum(axis=1)   # what an ad at slot 3 pushes out
+    loss3 = ((w[2:ROW] - w[3:])[None, :] * s_row[:, 2:]).sum(axis=1)   # what an ad at slot 3 pushes out
     print(f"  estimates for an ad at slot 3, mean over users: revenue {look[2] * ad_value.mean():.4f} coins, "
           f"satisfied plays pushed out {loss3.mean():.4f}")
     print(f"  {'':<34}{'rows with an ad':>16}{'mean slot':>10}{'online':>8}{'against':>17}{'revenue / row':>15}")
     policies = [("no ads", None, None), ("fixed: slot 3", (3,), None), ("fixed: slots 3 and 8", (3, 8), None)]
-    policies += [(f"best slot, exchange rate {e}", None, e) for e in (0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.3)]
+    policies += [(f"best slot, exchange rate {e}", None, e) for e in EXCHANGE]
     for label, slots, e in policies:
-        top = rel.copy()
         if e is not None:
-            slot = ad_allocation(s_top, look, ad_value, e)
-            for k in range(1, ROW + 1):
-                m = (slot == k) & (ad >= 0)
-                top[m] = insert_at(top[m], ad[m], k)
+            slot = ad_allocation(s_row, no_fixed, look, ad_value, e)
+            top = assemble(kept_a, plain, items, ROW, [(ad, slot)])
             shown, mean_slot = (slot > 0) & (ad >= 0), slot[(slot > 0) & (ad >= 0)]
-        elif slots is not None:
-            for k, s_ in enumerate(slots):                            # the best ad at slot 3, the next at slot 8
-                top = insert_at(top, two_ads[:, k], s_)
+        elif slots is not None:                                   # the best ad at slot 3, the next at slot 8
+            top = assemble(kept_a, plain, items, ROW, [(two_ads[:, k], s_) for k, s_ in enumerate(slots)])
             shown, mean_slot = ad >= 0, np.full((ad >= 0).sum(), np.mean(slots))
         else:
-            shown, mean_slot = np.zeros(len(top), dtype=bool), np.zeros(1)
+            top, shown, mean_slot = rel, np.zeros(len(rel), dtype=bool), np.zeros(1)
         on = online(top, test["aud"], W)
         d, se = paired(on, base["online"])
         print(f"  {label:<34}{shown.mean():>16.1%}{(np.mean(mean_slot) if len(mean_slot) else 0):>10.2f}{on.mean():>8.4f}"

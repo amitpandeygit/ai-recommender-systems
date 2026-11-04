@@ -10,18 +10,20 @@ The bi-encoder (two towers, Chapter 6) encodes the request and the history on on
 side and the candidate on the other, and scores their dot product, so every
 candidate vector can be computed ahead and stored. The cross-encoder puts all the
 tokens into one sequence through two self-attention layers, so every history token
-can attend to the candidate and back; its score cannot be computed ahead. A third
+can attend to the candidate and back; the token vectors can be stored, but the
+attention layers and the score must run once for every (user, candidate) pair. A third
 model is the cross-encoder with the eight dense features of Chapter 7 added to its
 output layer, as a production reranker would have them.
 
 All three are trained like Chapter 7's ranker: a click head (with the shallow
 position tower) and a play head, epochs chosen on the validation week (1 to 4). On
 the test week each reorders the same 50 candidates the shipped pre-ranker keeps,
-from seeds 0, 1 and 2, and the time to score 50 candidates for one request is
+from seeds 0, 1 and 2, and each seed is compared with the shipped heavy ranker
+retrained from the same seed. The time to score 50 candidates for one request is
 measured. Pretrained text cross-encoders, for search and the assistant, come with
 Chapters 18 and 19; this one is trained from scratch on Tesselo's logs.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 13 minutes):
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 12 minutes):
     python chapter_08/cross_encoder.py
 """
 import os
@@ -38,8 +40,9 @@ from torch import nn
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from slate_data import KEPT, order_by, paired, row_metrics, split, tensors, world  # noqa: E402
-from rankers import take  # noqa: E402
+from slate_data import (KEPT, SHIP, Ranker, order_by, row_metrics, seed_paired, split, tensors, train,  # noqa: E402
+                        world)
+from rankers import score_pools, take  # noqa: E402
 
 D = 32                        # length of every token vector
 HIST = 10                     # history tokens per user
@@ -246,13 +249,21 @@ if __name__ == "__main__":
     print(f"\nTest week: each model reorders the {KEPT} candidates the shipped pre-ranker keeps; offline on "
           f"{len(test['rows']):,} test users, the rest on {len(test['aud']):,} consenting users")
     print(f"  {'':<26}{'NDCG@10':>8}{'coverage':>9}{'top-10% cr.':>12}{'ms / request':>14}   online, seeds 0, 1, 2"
-          f"      mean   against the heavy ranker")
-    heavy_top_r = order_by(test["kept_rows"], test["heavy_rows"])
-    heavy_top_a = order_by(test["kept_aud"], test["heavy_aud"])
-    base = row_metrics(heavy_top_r, heavy_top_a, test, W, boredom_too=False)
+          f"      mean   against  s.e. seeds  s.e. users")
+    base_runs, base = [], None
+    for seed in SEEDS:                                       # the shipped ranker, retrained from each seed
+        h = test["heavy"] if seed == 0 else train(Ranker(test["meta"], SHIP["arch"], seed=seed), test["b"],
+                                                  test["R"], epochs=SHIP["epochs"], seed=seed)
+        res = row_metrics(order_by(test["kept_rows"], score_pools(h, test["S"], users, items, test["rows"],
+                                                                  test["kept_rows"])),
+                          order_by(test["kept_aud"], score_pools(h, test["S"], users, items, test["aud"],
+                                                                 test["kept_aud"])), test, W, boredom_too=False)
+        base_runs.append(res["online"])
+        base = res if seed == 0 else base
     print(f"  {'heavy ranker (shipped)':<26}{base['NDCG@10']:>8.4f}{base['coverage']:>9.1%}"
           f"{base['top-10% creators']:>12.1%}{request_ms(test['heavy'], test, users, items, heavy=True):>14.3f}"
-          f"   {base['online'].mean():.4f}")
+          f"   {base_runs[0].mean():.4f}  {base_runs[1].mean():.4f}  {base_runs[2].mean():.4f}  "
+          f"{np.mean([o.mean() for o in base_runs]):.4f}  [{time.time() - t0:.0f} s]")
     for kind in kinds:
         onl, first, ms = [], None, None
         for seed in SEEDS:
@@ -263,9 +274,13 @@ if __name__ == "__main__":
             onl.append(res["online"])
             if seed == 0:
                 first, ms = res, request_ms(m, test, users, items)
-        d, se = paired(onl[0], base["online"])
+        d, se_seeds, se_users = seed_paired(onl, base_runs)
         print(f"  {kind:<26}{first['NDCG@10']:>8.4f}{first['coverage']:>9.1%}{first['top-10% creators']:>12.1%}"
               f"{ms:>14.3f}   {onl[0].mean():.4f}  {onl[1].mean():.4f}  {onl[2].mean():.4f}  "
-              f"{np.mean([o.mean() for o in onl]):.4f}   {d:+.4f} ({se:.4f})  [{time.time() - t0:.0f} s]")
-    print("  (ms / request: median time to score one user's 50 candidates on this machine, one reference run; "
-          "the bi-encoder's candidate vectors are computed ahead)")
+              f"{np.mean([o.mean() for o in onl]):.4f}   {d:+.4f}  {se_seeds:>10.4f}  {se_users:>10.4f}  "
+              f"[{time.time() - t0:.0f} s]")
+    print("  (NDCG@10, coverage, top-10% creators and ms / request are seed 0's; ms / request: median time to score "
+          "one user's 50 candidates on this machine, one reference run; the bi-encoder's candidate vectors are "
+          "computed ahead. The last three columns compare each seed with the heavy ranker retrained from the same "
+          "seed: the mean of the three differences, its standard error across seeds, and the per-user standard "
+          "error of one run)")

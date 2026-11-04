@@ -156,7 +156,9 @@ def row_metrics(top_rows, top_aud, sp, W, boredom_too=True):
     items, S = W["items"], sp["S"]
     nd = np.mean([ndcg_at_k(t.tolist(), {i: 1.0 for i in sp["pos"][u]}) for u, t in zip(sp["rows"], top_rows)])
     hit = np.mean([len(sp["pos"][u] & set(t.tolist())) > 0 for u, t in zip(sp["rows"], top_rows)])
-    cov, cr = guardrails(top_aud, S["ok"], items["creator"], top_creators(W, S), len(items["vec"]))
+    # the guardrails count videos only, each in its own slot: an ad slot counts for no creator
+    videos = np.where((top_aud >= 0) & ~items["is_product"][np.maximum(top_aud, 0)], top_aud, -1)
+    cov, cr = guardrails(videos, S["ok"], items["creator"], top_creators(W, S), len(items["vec"]))
     div = np.nanmean([diversity(t.tolist(), items["category"]) for t in top_aud])
     out = {"hit@10": hit, "NDCG@10": nd, "online": online(top_aud, sp["aud"], W),
            "coverage": cov, "top-10% creators": cr, "variety": div}
@@ -179,6 +181,16 @@ def paired(a, b):
     """Mean of a - b over the same users, and its standard error."""
     d = np.asarray(a) - np.asarray(b)
     return float(d.mean()), float(d.std(ddof=1) / np.sqrt(len(d)))
+
+
+def seed_paired(runs, base_runs):
+    """Seed-paired comparison: for each seed, the mean difference over the same users
+    (run s against base run s). Returns the mean of those differences, its standard
+    error across seeds (training variation), and the mean per-user standard error
+    (the noise of one run's measurement)."""
+    d = np.array([paired(a, b)[0] for a, b in zip(runs, base_runs)])
+    user_se = float(np.mean([paired(a, b)[1] for a, b in zip(runs, base_runs)]))
+    return float(d.mean()), float(d.std(ddof=1) / np.sqrt(len(d))), user_se
 
 
 def rules(cfg, users, items, catalogue=None, seed_offset=800):

@@ -11,10 +11,12 @@ changes. The relevance label is the satisfied play (a completion or a like).
   pairwise, RankNet    - inside each logged slate, every (satisfied, not satisfied) pair:
                          -log sigmoid(s_i - s_j)
   pairwise, BPR        - the same criterion, but each satisfied play is paired with an
-                         eligible video drawn at random from the catalogue, as BPR does
-                         (Rendle and colleagues, 2009; Chapter 4 used it for factorisation)
-  listwise, softmax    - per slate, cross-entropy between the label shares and the softmax of
-                         the scores (the top-one form of ListNet)
+                         eligible video drawn at random from those the user has not used or
+                         enjoyed, as BPR does (Rendle and colleagues, 2009; Chapter 4 used it
+                         for factorisation)
+  listwise, softmax    - per slate, cross-entropy between the label shares y_i / sum(y) and the
+                         softmax of the scores: the softmax cross-entropy loss (Bruch and
+                         colleagues, 2019); original ListNet puts a softmax on the labels too
   LambdaRank           - RankNet's pairs, each weighted by how much NDCG would change if the
                          two swapped places in the current order
   LambdaMART           - LightGBM's lambdarank objective: gradient-boosted trees on the
@@ -43,7 +45,7 @@ import torch.nn.functional as F
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from slate_data import (KEPT, SHIP, Ranker, order_by, paired, predict, row_metrics, slates, split,  # noqa: E402
+from slate_data import (KEPT, SHIP, Ranker, order_by, predict, row_metrics, seed_paired, slates, split,  # noqa: E402
                         tensors, train, world)
 from rankers import take  # noqa: E402
 from ranking_data import pair_features  # noqa: E402
@@ -97,6 +99,7 @@ def train_ltr(meta, b, R, G, kind, S_list, users, items, epochs, seed=0, lr=2e-3
         units = np.arange(len(R["play"]))                                 # rows
     elif kind == "pairwise, BPR":
         units = np.flatnonzero(R["play"])                                 # satisfied rows
+        known = known_positives(R)
     else:
         units = np.flatnonzero((G >= 0).any(1) & np.array([R["play"][g[g >= 0]].any() for g in G]))
     step = 1024 if kind == "pointwise, one head" else batch
@@ -109,8 +112,11 @@ def train_ltr(meta, b, R, G, kind, S_list, users, items, epochs, seed=0, lr=2e-3
                 out = model(take(b, torch.as_tensor(u)), position=pos_all[u])["click"]
                 loss = F.binary_cross_entropy_with_logits(out, y_all[u])
             elif kind == "pairwise, BPR":
+                neg = np.array([sample_negative(S_list[R["snap"][r]], R["user"][r], known, rng) for r in u])
+                u, neg = u[neg >= 0], neg[neg >= 0]                       # a row with no negative is skipped
+                if len(u) == 0:
+                    continue
                 s_pos = model(take(b, torch.as_tensor(u)), position=pos_all[u])["click"]
-                neg = np.array([sample_negative(S_list[R["snap"][r]], R["user"][r], rng) for r in u])
                 bn = tensors(S_list, users, items, R["user"][u], neg, R["snap"][u])
                 s_neg = model(take(bn, torch.arange(len(u))), position=pos_all[u])["click"]
                 loss = F.softplus(-(s_pos - s_neg)).mean()
@@ -136,12 +142,26 @@ def train_ltr(meta, b, R, G, kind, S_list, users, items, epochs, seed=0, lr=2e-3
     return model
 
 
-def sample_negative(S, u, rng):
-    """An eligible video the user has not used, drawn uniformly (BPR's sampler)."""
-    while True:
+def known_positives(R):
+    """Each user's satisfied plays in the training rows (all weeks of R): BPR treats
+    them as observed, so they are never drawn as negatives."""
+    known = {}
+    for u, i in zip(R["user"][R["play"]], R["item"][R["play"]]):
+        known.setdefault(int(u), set()).add(int(i))
+    return known
+
+
+def sample_negative(S, u, known, rng, tries=1_000):
+    """An eligible video the user has neither used before the snapshot nor enjoyed in
+    the training rows, drawn uniformly (BPR's sampler); -1 if there is none."""
+    seen = known.get(int(u), set())
+    for _ in range(tries):
         j = int(rng.integers(len(S["ok"])))
-        if S["ok"][j] and not S["used"][u, j]:
+        if S["ok"][j] and not S["used"][u, j] and j not in seen:
             return j
+    left = np.flatnonzero(S["ok"] & ~S["used"][u])
+    left = left[~np.isin(left, list(seen))]
+    return int(rng.choice(left)) if len(left) else -1
 
 
 def ndcg10(top, sp):
@@ -301,8 +321,8 @@ if __name__ == "__main__":
     print(f"\nTest week: each model orders the {KEPT} candidates the shipped pre-ranker keeps; offline on "
           f"{len(test['rows']):,} test users, online on {len(test['aud']):,} consenting users")
     print(f"  {'':<24}{'slate NDCG':>11}{'NDCG@10':>9}{'coverage':>9}{'top-10% cr.':>12}   online, seeds 0, 1, 2"
-          f"      mean")
-    base_users = None
+          f"      mean   against  s.e. seeds  s.e. users")
+    base_runs = None
     for kind in ("pointwise, two heads",) + LOSSES + ("LambdaMART",):
         onl, first = [], None
         for seed in SEEDS:
@@ -331,13 +351,13 @@ if __name__ == "__main__":
             if seed == 0:
                 first = (slate_ndcg(ho, R3["play"].astype(float), G3), res)
         if kind == "pointwise, two heads":
-            base_users = onl[0]
+            base_runs = onl
         sn, res = first
         print(f"  {kind:<24}{sn:>11.4f}{res['NDCG@10']:>9.4f}{res['coverage']:>9.1%}{res['top-10% creators']:>12.1%}"
               f"   {onl[0].mean():.4f}  {onl[1].mean():.4f}  {onl[2].mean():.4f}  {np.mean([o.mean() for o in onl]):.4f}"
               + ("" if kind == "pointwise, two heads" else
-                 f"   {paired(onl[0], base_users)[0]:+.4f} ({paired(onl[0], base_users)[1]:.4f})"))
-    print("  (slate NDCG: the logged slates of days 23 to 30 with a satisfied play, reordered by the model; "
-          "the last column is seed 0's paired online difference against pointwise, two heads, with its standard "
-          "error)")
+                 "   {:+.4f}  {:>15.4f}  {:>10.4f}".format(*seed_paired(onl, base_runs))))
+    print("  (slate NDCG: the logged slates of days 23 to 30 with a satisfied play, reordered by the model; the "
+          "last three columns compare each seed with the same seed of pointwise, two heads: the mean of the three "
+          "differences, its standard error across seeds, and the per-user standard error of one run)")
     print(f"[{time.time() - t0:.0f} s]")
