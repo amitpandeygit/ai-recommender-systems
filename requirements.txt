@@ -1,3 +1,5 @@
 numpy>=2.0
 torch>=2.0
 faiss-cpu>=1.8
+pyroaring>=1.0
+lightgbm>=4.0
