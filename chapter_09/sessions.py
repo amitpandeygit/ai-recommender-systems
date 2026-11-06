@@ -39,8 +39,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from seq_data import (CHOICE, DAY, MAX_LEN, WORLDS, environment, exclude_mask, histories, known, load,  # noqa: E402
-                      ndcg, online, paired, requests, top10, training_sequences)
+from seq_data import (CHOICE, DAY, MAX_LEN, WORLDS, available_clicks, environment, exclude_mask,  # noqa: E402
+                      histories, known, load, ndcg, online, paired, requests, top10, training_sequences)
 import baselines as B  # noqa: E402
 from seq_models import SeqModel, fit, score  # noqa: E402
 from implicit_scores import estimated_action_time  # noqa: E402
@@ -57,9 +57,8 @@ def split_history(W, R, H):
     starts = np.searchsorted(C["user"], np.arange(len(W["users"]["vec"]) + 1))
     before, visit = np.full(H.shape, -1), np.full(H.shape, -1)
     for k, (u, t, s) in enumerate(zip(R["user"], R["time"], R["session"])):
-        a, b = starts[u], starts[u + 1]
-        ok = (C["known"][a:b] < t) & (C["until"][a:b] > t) & (C["t"][a:b] < t)
-        items, ses = C["item"][a:b][ok], C["session"][a:b][ok]
+        idx = available_clicks(C, starts[u], starts[u + 1], t)      # in the user's order (section 9.2)
+        items, ses = C["item"][idx], C["session"][idx]
         old, new = items[ses != s][-MAX_LEN:], items[ses == s][-MAX_LEN:]
         if len(old):
             before[k, -len(old):] = old

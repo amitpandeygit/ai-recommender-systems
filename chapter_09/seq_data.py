@@ -10,7 +10,8 @@ that world's logs with the same code and seeds.
   click_log(W)       - one row per video click of a consenting user, with the moment
                        the server could credit it to the user (Chapter 2's identity
                        rule, replayed as logins arrive: link_intervals), in each
-                       user's order (the phone's own counter on one phone: device_order)
+                       user (the order of a history is set when it is read, from the
+                       clicks available then: available_clicks and device_order)
   requests(W, a, b)  - every request served in days [a, b) to a consenting user who was
                        logged in, with its visit, its place in the visit and the videos
                        satisfied in it
@@ -138,8 +139,9 @@ def device_order(user, install, seq, t, event_id):
 
 def click_log(W):
     """Video clicks of consenting users, deduplicated, each credited to its user from
-    the moment the server could know it (link_intervals), in each user's order
-    (device_order). Fields: user, item, session, install, seq, t (estimated action
+    the moment the server could know it (link_intervals), sorted by user and time;
+    each history is put in the user's order when it is read (available_clicks).
+    Fields: user, item, session, install, seq, t (estimated action
     time), known (when the server could credit the click to the user: its arrival,
     or the arrival of the login that linked it) and until (when a later login ended
     the link; inf if never)."""
@@ -155,7 +157,7 @@ def click_log(W):
          "install": e["anonymous_id"][keep], "seq": e["seq"][keep], "t": t[keep],
          "known": np.maximum(start[keep], e["server_time"][keep]), "until": until[keep],
          "arrival": e["server_time"][keep], "event_id": e["event_id"][keep]}
-    o = device_order(c["user"], c["install"], c["seq"], c["t"], c["event_id"])
+    o = np.lexsort((c["event_id"], c["t"], c["user"]))             # by user; the order is set when read
     return {k: v[o] for k, v in c.items()}
 
 
@@ -194,35 +196,42 @@ def requests(W, start_day, end_day):
     return R
 
 
+def available_clicks(C, a, b, t):
+    """The clicks of one user (rows a to b of the click log) that the
+    server could use at time t, in the user's order. The order is worked out from
+    these clicks alone (device_order), so a click that arrives later can never move
+    an earlier one."""
+    ok = a + np.flatnonzero((C["known"][a:b] < t) & (C["until"][a:b] > t) & (C["t"][a:b] < t))
+    o = device_order(C["user"][ok], C["install"][ok], C["seq"][ok], C["t"][ok], C["event_id"][ok])
+    return ok[o]
+
+
 def histories(W, R, length=MAX_LEN):
-    """For each request: the last `length` clicked videos the server had received
-    before it was served (left-padded with -1), and how many of them came in the
-    same visit."""
+    """For each request: the last `length` clicked videos the server could use when
+    it was served (left-padded with -1), and how many of them came in the same visit."""
     C = W["clicks"]
     starts = np.searchsorted(C["user"], np.arange(len(W["users"]["vec"]) + 1))
     H = np.full((len(R["user"]), length), -1)
     in_visit = np.zeros(len(R["user"]), dtype=np.int64)
     for k, (u, t, sess) in enumerate(zip(R["user"], R["time"], R["session"])):
-        a, b = starts[u], starts[u + 1]
-        ok = (C["known"][a:b] < t) & (C["until"][a:b] > t) & (C["t"][a:b] < t)
-        items, ses = C["item"][a:b][ok][-length:], C["session"][a:b][ok][-length:]
-        if len(items):
-            H[k, -len(items):] = items
-            in_visit[k] = (ses == sess).sum()
+        idx = available_clicks(C, starts[u], starts[u + 1], t)[-length:]
+        if len(idx):
+            H[k, -len(idx):] = C["item"][idx]
+            in_visit[k] = (C["session"][idx] == sess).sum()
     return H, in_visit
 
 
 def training_sequences(W, cutoff, length=MAX_LEN):
-    """Each user's clicked videos that had arrived by the cutoff, in order (for
-    fitting); users with at least two clicks."""
+    """Each user's clicked videos that the server could use at the cutoff, in order
+    (for fitting); users with at least two clicks."""
     C = W["clicks"]
-    ok = known(C, cutoff)
+    starts = np.searchsorted(C["user"], np.arange(len(W["users"]["vec"]) + 1))
     seqs, sessions = [], []
-    for u in np.unique(C["user"][ok]):
-        m = ok & (C["user"] == u)
-        if m.sum() >= 2:
-            seqs.append(C["item"][m])
-            sessions.append(C["session"][m])
+    for u in range(len(W["users"]["vec"])):
+        idx = available_clicks(C, starts[u], starts[u + 1], cutoff)
+        if len(idx) >= 2:
+            seqs.append(C["item"][idx])
+            sessions.append(C["session"][idx])
     return seqs, sessions
 
 
@@ -402,8 +411,17 @@ def contract_checks():
     o = device_order(np.array([7, 7, 7]), np.array([9, 9, 8]), np.array([1, 2, 1]),
                      np.array([1.0, 5.0, 3.0]), np.array([0, 1, 2]))
     assert o.tolist() == [0, 2, 1]
+    # two phones: A1 and B1 are known at 15; A2, done on phone A after A1 but with an earlier
+    # estimated time, becomes known at 20. The history at 15 must not depend on A2.
+    C = {"user": np.array([7, 7, 7]), "install": np.array([1, 2, 1]), "seq": np.array([1, 1, 2]),
+         "t": np.array([10.0, 7.0, 5.0]), "event_id": np.array([0, 1, 2]), "known": np.array([10.0, 8.0, 20.0]),
+         "until": np.full(3, np.inf)}
+    with_a2 = available_clicks(C, 0, 3, 15).tolist()
+    without = available_clicks({k: v[:2] for k, v in C.items()}, 0, 2, 15).tolist()
+    assert with_a2 == without == [1, 0]
     return "passed: a click counts only after the login that links it has arrived; a later login of a " \
-           "second account ends the link; one phone's clicks keep its own order"
+           "second account ends the link; one phone's clicks keep its own order; a click known later " \
+           "never changes an earlier history"
 
 
 if __name__ == "__main__":
@@ -424,8 +442,23 @@ if __name__ == "__main__":
         user, _, until = link_intervals(e)
         same = np.array_equal(np.where(np.isinf(until), user, -1), link_same_visit(e))
         del e, e_all, user, until
-        same_phone = (C["user"][1:] == C["user"][:-1]) & (C["install"][1:] == C["install"][:-1])
-        swapped = int((same_phone & (C["t"][1:] < C["t"][:-1])).sum())
+        o = np.lexsort((C["seq"], C["install"], C["user"]))         # each phone's clicks in its own order
+        same_phone = (C["user"][o][1:] == C["user"][o][:-1]) & (C["install"][o][1:] == C["install"][o][:-1])
+        swapped = int((same_phone & (C["t"][o][1:] < C["t"][o][:-1])).sum())
+        R = requests(W, 23, 30)
+        H, _ = histories(W, R)
+        rng = np.random.default_rng(0)
+        pick = np.sort(rng.choice(len(R["user"]), 2_000, replace=False))   # 2,000 test requests, each with
+        same_h = True                                                   # only the clicks known before it
+        for k in pick:
+            keep = C["known"] < R["time"][k]
+            Ck = {f: v[keep] for f, v in C.items()}
+            Hk, _ = histories(dict(W, clicks=Ck), {f: R[f][[k]] for f in ("user", "time", "session")})
+            same_h &= bool(np.array_equal(Hk[0], H[k]))
+        users_phones = np.unique(np.stack([C["user"], C["install"]], axis=1), axis=0)[:, 0]
+        print(f"{name}: histories of 2,000 test requests are the same when every click not yet known is removed "
+              f"from the log: {same_h}; users whose clicks come from more than one phone: "
+              f"{int((np.bincount(users_phones) > 1).sum())}")
         print(f"{name}: once every login has arrived, the replayed links equal Chapter 2's link_same_visit: {same}; "
               f"clicks credited later than they arrived, because the login came later: "
               f"{int((C['known'] > C['arrival']).sum()):,}; links ended by a later login: "

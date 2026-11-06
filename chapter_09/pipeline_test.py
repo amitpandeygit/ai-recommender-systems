@@ -21,7 +21,8 @@ gain comes from:
 
   history frozen           - the sequence model reads only the clicks known at day 23
                             (day 16 on the validation week), as a daily snapshot would
-  order shuffled           - the same clicks as the blend, in a random order
+  order shuffled           - the same clicks as the blend, in a random order (5 random
+                            orders, each with its own blend; the first is in the table)
   co-occurrence            - section 9.3's unordered co-occurrence score on the same fresh
                             clicks, in place of the sequence model
 
@@ -37,7 +38,7 @@ weight can grow once the visit has shown its intent.
 Differences against A are paired over the same requests, with standard errors and 95%
 intervals from 1,000 bootstrap draws of whole users (seq_data.paired).
 
-Needs Python 3.12 or later, PyTorch and pyroaring. Run from the repository root (about 10 minutes;
+Needs Python 3.12 or later, PyTorch and pyroaring. Run from the repository root (about 12 minutes;
 add 0 or 1 to run one world only; with no number, each world runs in a process of
 its own, one after the other, to keep memory down):
     python chapter_09/pipeline_test.py
@@ -70,6 +71,7 @@ from two_tower import guardrails  # noqa: E402
 
 EXTRA = 50                                                      # sequence candidates added per request
 SECOND = ("sequence model", "history frozen", "order shuffled", "co-occurrence")
+SHUFFLES = 5                                                    # random orders tried for the shuffled control
 
 
 def logit(p):
@@ -149,8 +151,11 @@ def shuffled(H, seed):
 def inputs(W, R, H, iv, cutoff, seed):
     """The history and visit flag each second model reads, for requests R."""
     Hf, _ = histories(W, dict(R, time=np.full(len(R["time"]), float(cutoff))))
-    return {"sequence model": (H, iv), "history frozen": (Hf, np.zeros_like(iv)),
-            "order shuffled": (shuffled(H, seed), iv), "co-occurrence": (H, iv)}
+    out = {"sequence model": (H, iv), "history frozen": (Hf, np.zeros_like(iv)),
+           "order shuffled": (shuffled(H, seed), iv), "co-occurrence": (H, iv)}
+    for j in range(1, SHUFFLES):                                    # the same control with other random orders
+        out[f"order shuffled {j + 1}"] = (shuffled(H, seed + 1_000 * j), iv)
+    return out
 
 
 def second_scores(kind, m, G, H, video):
@@ -204,7 +209,7 @@ if __name__ == "__main__":
         wts, n_rows, n_pos = fit_blends(W, n)
         print(f"\n{name}: sequence model {', '.join(str(x) for x in CHOICE[name])} epochs; blends fitted on "
               f"{n_rows:,} validation impressions ({n_pos:,} satisfied)  [{time.time() - t0:.0f} s]")
-        for k, w in wts.items():
+        for k, w in ((k, w) for k, w in wts.items() if k in SECOND):
             print(f"  blend with {k + ':':<16} {w[0]:+.3f} {w[1]:+.3f} x heavy logit {w[2]:+.3f} x second score "
                   f"{w[3]:+.3f} x visit has a click {w[4]:+.3f} x second score once the visit has a click")
         sp = split(W, "test")
@@ -246,7 +251,7 @@ if __name__ == "__main__":
                 hp = score_pools(sp["heavy"], S, users, items, R["user"][a:b], np.maximum(cands, 0))
                 hp = np.where(cands >= 0, hp, np.nan)
                 orders = {"heavy": hp}
-                for k in (SECOND if cand_label == "50" else SECOND[:1]):
+                for k in (list(inp) if cand_label == "50" else SECOND[:1]):
                     second = np.where(cands >= 0, np.take_along_axis(sec[k], np.maximum(cands, 0), axis=1), 0.0)
                     orders[k] = features(np.nan_to_num(hp, nan=0.5), second, inp[k][1][a:b, None]) @ wts[k]
                 for score_label, sc in orders.items():
@@ -287,6 +292,20 @@ if __name__ == "__main__":
             print(f"  {label:<26}{ndcg(R, top):>9.4f}{cov:>10.1%}{cr:>12.1%}{on.mean():>9.4f}{on[later].mean():>9.4f}"
                   f"{d:>18}{ci:>20}{dl:>19}{rev.mean():>9.4f}{breaks:>13}{shown_bad:>13}")
             res[label] = on
+        ons = {k: outcomes(W, R, np.concatenate(arms[("50", k)]))[1].sum(axis=1) for k in inp}
+        blend = ons["sequence model"]
+        direct = []
+        for k, lbl in (("history frozen", "history frozen"), ("order shuffled", "shuffled"),
+                       ("co-occurrence", "co-occurrence")):
+            direct.append(lbl + " {:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(*paired(blend, ons[k], R["user"])))
+        print("  The blend against each control (blend minus control, paired over the same requests, users "
+              "resampled): " + "; ".join(direct))
+        shuf = [k for k in inp if k.startswith("order shuffled")]
+        gains = ", ".join(f"{paired(ons[k], base, R['user'])[0]:+.4f}" for k in shuf)
+        gaps = ", ".join("{:+.4f} [{:+.4f}, {:+.4f}]".format(*np.array(paired(blend, ons[k], R["user"]))[[0, 2, 3]])
+                         for k in shuf)
+        print(f"  The shuffled control with {len(shuf)} random orders: against A {gains}; blend minus shuffled "
+              f"{gaps}  (one fitted sequence model; each order has its own blend, fitted on the validation week)")
         lang = users["language"][R["user"]]
         print("  online by app language: " + "  ".join(
             f"{LANGUAGES[g]} ({(lang == g).sum():,}): " + "/".join(f"{res[lbl][lang == g].mean():.4f}" for lbl in res)
