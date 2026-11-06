@@ -22,7 +22,7 @@ Two questions, in both worlds.
    The rules that can be known without a profile still apply: no 18+ videos (the age
    is unknown), the region's licences, removed videos.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 11 minutes;
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 10 minutes;
 add 0 or 1 to run one world only; with no number, each world runs in a process of
 its own, one after the other, to keep memory down):
     python chapter_09/sessions.py
@@ -39,8 +39,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from seq_data import (CHOICE, DAY, MAX_LEN, WORLDS, exclude_mask, histories, load, ndcg, online, paired,  # noqa: E402
-                      requests, top10, training_sequences)
+from seq_data import (CHOICE, DAY, MAX_LEN, WORLDS, environment, exclude_mask, histories, known, load,  # noqa: E402
+                      ndcg, online, paired, requests, top10, training_sequences)
 import baselines as B  # noqa: E402
 from seq_models import SeqModel, fit, score  # noqa: E402
 from implicit_scores import estimated_action_time  # noqa: E402
@@ -58,7 +58,7 @@ def split_history(W, R, H):
     before, visit = np.full(H.shape, -1), np.full(H.shape, -1)
     for k, (u, t, s) in enumerate(zip(R["user"], R["time"], R["session"])):
         a, b = starts[u], starts[u + 1]
-        ok = (C["arrived"][a:b] < t) & (C["t"][a:b] < t)
+        ok = (C["known"][a:b] < t) & (C["until"][a:b] > t) & (C["t"][a:b] < t)
         items, ses = C["item"][a:b][ok], C["session"][a:b][ok]
         old, new = items[ses != s][-MAX_LEN:], items[ses == s][-MAX_LEN:]
         if len(old):
@@ -86,12 +86,13 @@ def anonymous_requests(W, start_day, end_day):
     t = estimated_action_time(e)
     clk = (e["event"] == "click") & (e["item_id"] >= 0) & ~items["is_product"][np.maximum(e["item_id"], 0)]
     by_session = {}
-    for sess, item, tt, arr in zip(e["session_id"][clk], e["item_id"][clk], t[clk], e["server_time"][clk]):
-        by_session.setdefault(int(sess), []).append((tt, arr, int(item)))
+    for sess, q, item, tt, arr in zip(e["session_id"][clk], e["seq"][clk], e["item_id"][clk], t[clk],
+                                      e["server_time"][clk]):
+        by_session.setdefault(int(sess), []).append((q, tt, arr, int(item)))
     H = np.full((len(idx), MAX_LEN), -1)
     for k, (sess, tt) in enumerate(zip(R["session"], R["time"])):
-        got = sorted(x for x in by_session.get(int(sess), []) if x[0] < tt and x[1] < tt)
-        got = [x[2] for x in got][-MAX_LEN:]
+        got = sorted(x for x in by_session.get(int(sess), []) if x[1] < tt and x[2] < tt)   # in the phone's order
+        got = [x[3] for x in got][-MAX_LEN:]
         if got:
             H[k, -len(got):] = got
     hit = np.isin(ev["event"], ("complete", "like")) & (ev["item_id"] >= 0)
@@ -123,9 +124,9 @@ def anonymous_mask(W, R, H):
 def session_sequences(W, cutoff):
     """Visits of consenting, logged-in users with 2+ clicks, as sequences."""
     C = W["clicks"]
-    ok = (C["arrived"] < cutoff) & (C["t"] < cutoff)
+    ok = known(C, cutoff)
     out = []
-    o = np.lexsort((C["t"][ok], C["session"][ok]))
+    o = np.lexsort((C["seq"][ok], C["session"][ok]))                # a visit is one phone: its own order
     ses, item = C["session"][ok][o], C["item"][ok][o]
     start = np.r_[0, np.flatnonzero(np.diff(ses)) + 1, len(ses)]
     for a, b in zip(start[:-1], start[1:]):
@@ -137,6 +138,7 @@ def session_sequences(W, cutoff):
 if __name__ == "__main__":
     t0 = time.time()
     if not sys.argv[1:]:                                           # each world in its own process, to save memory
+        print(environment())
         for k in range(len(WORLDS)):
             subprocess.run([sys.executable, "-u", __file__, str(k)], check=True)
         sys.exit()
@@ -149,6 +151,7 @@ if __name__ == "__main__":
         R = requests(W, 23, 30)
         H, in_visit = histories(W, R)
         bad = exclude_mask(W, W["snaps"][23], R, H)
+        pop = B.popularity(W, 23 * DAY)
         before, visit = split_history(W, R, H)
         m = fit(SeqModel(n, kind, W["items"]), training_sequences(W, 23 * DAY)[0], ep, loss)
         later = (R["place"] >= 1) & (in_visit > 0)
@@ -159,9 +162,10 @@ if __name__ == "__main__":
         res = {}
         for label, h in (("everything", H), ("before the visit", before), ("this visit only", visit)):
             hl, bl = h[later], bad[later]
-            top = top10(lambda a, b: score(m, hl[a:b]), bl)
+            top = top10(lambda a, b: score(m, hl[a:b]), bl, tie=pop)
             res[label] = online(W, Rl, top)
-            d = "" if label == "everything" else "{:+.4f} ({:.4f})".format(*paired(res[label], res["everything"]))
+            d = "" if label == "everything" else "{:+.4f} ({:.4f})".format(
+                *paired(res[label], res["everything"], Rl["user"])[:2])
             print(f"  {label:<34}{ndcg(Rl, top):>9.4f}{res[label].mean():>9.4f}{d:>20}")
 
         Ra, Ha = anonymous_requests(W, 23, 30)
@@ -179,25 +183,27 @@ if __name__ == "__main__":
         Rva_h = {k: (v[hv] if isinstance(v, np.ndarray) else [x for x, f in zip(v, hv) if f]) for k, v in Rva.items()}
         curve = []
         ms = SeqModel(n, kind, W["items"])
+        lang_pop_v = W["snaps"][16]["lang_pop"][W["users"]["language"][Rva_h["user"]]]
         fit(ms, sseq_v, MAX_EPOCHS[kind], loss, every=EVERY[kind],
             after=lambda e, mm: curve.append((e, ndcg(Rva_h, top10(lambda a, b: score(mm, Hva[hv][a:b]),
-                                                                   bad_va[hv])))))
+                                                                   bad_va[hv], tie=lambda a, b: lang_pop_v[a:b])))))
         ep_s = max(curve, key=lambda x: round(x[1], 9))[0]
         ms = fit(SeqModel(n, kind, W["items"]), sseq, ep_s, loss)
         M = B.session_matrix(W, 23 * DAY)
         X = B.contexts(Ha, Ra["place"], n, fallback=0)
-        rows = {"popular in language (today)": top10(lambda a, b: lang_pop[a:b], bada),
+        lp = lambda a, b: lang_pop[a:b]                            # noqa: E731  the fallback, and the tie-break
+        rows = {"popular in language (today)": top10(lp, bada),
                 "session kNN": top10(lambda a, b: np.where(Ra["place"][a:b, None] >= 1,
-                                                           B.session_knn(M, X[a:b]), lang_pop[a:b]), bada),
+                                                           B.session_knn(M, X[a:b]), lang_pop[a:b]), bada, tie=lp),
                 f"session {kind} ({ep_s} epochs)": top10(lambda a, b: np.where(
-                    Ra["place"][a:b, None] >= 1, score(ms, Ha[a:b]), lang_pop[a:b]), bada)}
+                    Ra["place"][a:b, None] >= 1, score(ms, Ha[a:b]), lang_pop[a:b]), bada, tie=lp)}
         print(f"  {'':<34}{'NDCG@10':>9}{'online':>9}{'with a click':>14}{'against today':>18}")
         base = None
         for label, top in rows.items():
             on = online(W, Ra, top)
             base = on if base is None else base
-            d = "" if on is base else "{:+.4f} ({:.4f})".format(*paired(on[has], base[has]))
+            d = "" if on is base else "{:+.4f} ({:.4f})".format(*paired(on[has], base[has], Ra["session"][has])[:2])
             print(f"  {label:<34}{ndcg(Ra, top):>9.4f}{on.mean():>9.4f}{on[has].mean():>14.4f}{d:>18}")
         print(f"  (online: all no-profile requests; with a click: those with a click earlier in the visit, where the "
-              f"against column is measured; before the first click every method shows the language's popular "
-              f"videos)  [{time.time() - t0:.0f} s]")
+              f"against column is measured, with its standard error from 1,000 bootstrap draws of whole visits; "
+              f"before the first click every method shows the language's popular videos)  [{time.time() - t0:.0f} s]")

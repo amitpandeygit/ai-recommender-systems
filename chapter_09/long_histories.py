@@ -26,11 +26,15 @@ cluster size for a centroid). The methods differ only in what they read:
   search: nearest 50   - SIM's soft search: the 50 clicks whose vectors are closest to
                          the candidate (exact here; ETA and TWIN make it cheap)
   compressed: 16 / 64 / 200 - k-means: that many centroids of the history's vectors,
-                         each with its size, built offline (as TWIN V2 compresses
-                         lifelong histories; 200 is about a tenth of the history, its ratio)
+                         each with its size, built offline: a simple compression inspired
+                         by TWIN V2, which adds grouping by completion ratio, recursive
+                         clustering, feature aggregation and cluster-aware attention
+                         (200 is about a tenth of the history, TWIN V2's ratio)
 
 tau is chosen for each method on 500 validation users; results are on the other
-2,500. The cost is the vectors read per candidate and the bytes kept per user.
+2,500. The cost is the history vectors examined to choose what to read (all 2,000
+for an exact nearest search; a per-user category index or a hash, as in SIM, ETA or
+TWIN, examines far fewer), the vectors scored per candidate, and the bytes kept per user.
 
 Needs Python 3.12 or later and PyTorch. Run from the repository root (about five minutes):
     python chapter_09/long_histories.py
@@ -46,7 +50,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from seq_data import WORLDS, load  # noqa: E402
+from seq_data import WORLDS, environment, load  # noqa: E402
 from planted_world import category_directions  # noqa: E402
 from metrics import ndcg_at_k  # noqa: E402
 
@@ -136,6 +140,7 @@ def select(method, u_hist, cand, Yv, cat_of):
 
 if __name__ == "__main__":
     t0 = time.time()
+    print(environment())
     W = load(WORLDS[0])
     S = W["snaps"][23]
     Y = S["Y"] / np.maximum(np.linalg.norm(S["Y"], axis=1, keepdims=True), 1e-12)
@@ -159,11 +164,13 @@ if __name__ == "__main__":
         f"compressed: {k}" for k in CLUSTERS)
     reads = {"last 50": 50, "last 500": 500, "everything": hist.shape[1], "search: category": K,
              "search: nearest 50": K} | {f"compressed: {k}": k for k in CLUSTERS}
+    examined = {"last 50": 50, "last 500": 500, "everything": hist.shape[1], "search: category": K,
+                "search: nearest 50": hist.shape[1]} | {f"compressed: {k}": k for k in CLUSTERS}
     kept = {"last 50": 50 * 4, "last 500": 500 * 4, "everything": hist.shape[1] * 4,
             "search: category": hist.shape[1] * 4, "search: nearest 50": hist.shape[1] * 4,
             } | {f"compressed: {k}": k * (Y.shape[1] * 4 + 4) for k in CLUSTERS}   # float32 centroids and sizes
-    print(f"\n  {'':<22}{'tau':>5}{'NDCG@10':>9}{'recall@10':>11}{'rare interest':>15}{'vectors read':>14}"
-          f"{'bytes / user':>14}{'ms / request':>14}")
+    print(f"\n  {'':<22}{'tau':>5}{'NDCG@10':>9}{'recall@10':>11}{'rare interest':>15}{'examined':>10}"
+          f"{'scored':>8}{'bytes / user':>14}{'ms / request':>14}")
     for method in methods:
         res = {}
         for tau in TAUS:
@@ -186,5 +193,6 @@ if __name__ == "__main__":
         nd, rc, ms = res[best]
         test = np.arange(N_USERS) >= N_VAL
         print(f"  {method:<22}{best:>5}{nd[test].mean():>9.4f}{rc[test].mean():>11.4f}"
-              f"{nd[test & unseen].mean():>15.4f}{reads[method]:>14,}{kept[method]:>14,}{np.median(ms[test]):>14.3f}  "
+              f"{nd[test & unseen].mean():>15.4f}{examined[method]:>10,}{reads[method]:>8,}{kept[method]:>14,}"
+              f"{np.median(ms[test]):>14.3f}  "
               f"[{time.time() - t0:.0f} s]")

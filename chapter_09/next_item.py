@@ -1,10 +1,14 @@
 """Next-video tests: baselines, GRU4Rec, SASRec and BERT4Rec (sections 9.3 and 9.4).
 
 Every method answers each test request (days 23 to 30) with a row of 10 videos,
-using what the server had received before the request. It is compared with
-Chapter 8's ranker: section 8.2's filters, Chapter 6's pool, the pre-ranker's 50
-and the heavy ranker's order, from the day-23 snapshot (so one row per user for
-the whole week). No business rules here: section 9.7 adds them.
+using what the server had received, and could credit to the user, before the
+request. It is compared with Chapter 8's ranker: section 8.2's filters and Chapter
+6's pool from the day-23 snapshot, the pre-ranker's first 50 videos that the request
+may show, and the heavy ranker's order. No business rules here: section 9.7 adds
+them. Where a method has no evidence (all its scores tie), popularity decides.
+
+Differences against Chapter 8's ranker are paired over the same requests, with
+standard errors from 1,000 bootstrap draws of whole users (seq_data.paired).
 
 Settings are chosen on the validation week (fitted on what had arrived by day 16,
 tested on the requests of days 16 to 23), by NDCG@10, Chapter 5's rule: for each
@@ -12,7 +16,7 @@ neural model, the number of epochs (checked every 5, or every 10 for BERT4Rec).
 Each neural model is then refitted on what had arrived by day 23 from seeds 0, 1
 and 2. Results are given in both worlds.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 95 minutes;
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 90 minutes;
 add 0 or 1 to run one world only; with no number, each world runs in a process of
 its own, one after the other, to keep memory down):
     python chapter_09/next_item.py
@@ -29,8 +33,8 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from seq_data import (DAY, WORLDS, chapter8_rows, exclude_mask, histories, load, ndcg, online, paired,  # noqa: E402
-                      requests, top10, training_sequences)
+from seq_data import (DAY, WORLDS, chapter8_rows, environment, exclude_mask, histories, load, ndcg,  # noqa: E402
+                      online, paired, requests, top10, training_sequences)
 import baselines as B  # noqa: E402
 from seq_models import SeqModel, fit, score  # noqa: E402
 from slate_data import split  # noqa: E402
@@ -58,15 +62,15 @@ def baseline_rows(W, cutoff, R, H, in_visit, bad):
     M = B.session_matrix(W, cutoff)
     X = B.contexts(H, in_visit, n)
     return {"popularity, last 7 days": top10(pop, bad),
-            "co-occurrence": top10(lambda a, b: B.cooc_scores(G, H[a:b]), bad),
-            "session kNN": top10(lambda a, b: B.session_knn(M, X[a:b]), bad),
-            "Markov chain": top10(lambda a, b: B.markov_scores(T, H[a:b], pop), bad)}
+            "co-occurrence": top10(lambda a, b: B.cooc_scores(G, H[a:b]), bad, tie=pop),
+            "session kNN": top10(lambda a, b: B.session_knn(M, X[a:b]), bad, tie=pop),
+            "Markov chain": top10(lambda a, b: B.markov_scores(T, H[a:b], pop), bad, tie=pop)}
 
 
 def row_line(label, W, R, top, base, extra=""):
     on = online(W, R, top)
     later = R["place"] >= 1
-    d, se = paired(on, base) if base is not None else (0.0, 0.0)
+    d, se = paired(on, base, R["user"])[:2] if base is not None else (0.0, 0.0)
     against = "" if base is None else f"{d:+.4f} ({se:.4f})"
     print(f"  {label:<34}{extra:>8}{ndcg(R, top):>9.4f}{on.mean():>9.4f}{on[later].mean():>9.4f}{against:>18}")
     return on
@@ -75,6 +79,7 @@ def row_line(label, W, R, top, base, extra=""):
 if __name__ == "__main__":
     t0 = time.time()
     if not sys.argv[1:]:                                           # each world in its own process, to save memory
+        print(environment())
         for k in range(len(WORLDS)):
             subprocess.run([sys.executable, "-u", __file__, str(k)], check=True)
         sys.exit()
@@ -86,13 +91,14 @@ if __name__ == "__main__":
         print(f"\n{name}  [{time.time() - t0:.0f} s]")
         Rv, Hv, ivv, badv = phase(W, 16, W["snaps"][16])
         seqs_v, _ = training_sequences(W, 16 * DAY)
+        pop_v = B.popularity(W, 16 * DAY)
         print("Validation week: NDCG@10 after each check (epochs)")
         chosen = {}
         for kind, loss in NETS:
             curve = []
             m = SeqModel(n, kind, W["items"])
             fit(m, seqs_v, MAX_EPOCHS[kind], loss, every=EVERY[kind],
-                after=lambda e, m: curve.append((e, ndcg(Rv, top10(lambda a, b: score(m, Hv[a:b]), badv)))))
+                after=lambda e, m: curve.append((e, ndcg(Rv, top10(lambda a, b: score(m, Hv[a:b]), badv, tie=pop_v)))))
             best = max(curve, key=lambda x: round(x[1], 9))
             chosen[(kind, loss)] = best[0]
             print(f"  {kind + ', ' + loss:<34}" + " ".join(f"{e}:{x:.4f}" for e, x in curve)
@@ -104,8 +110,9 @@ if __name__ == "__main__":
         print(f"Test week: {len(R['user']):,} requests ({later.mean():.1%} later in their visit; "
               f"{np.mean([len(p) > 0 for p in R['pos']]):.1%} with a satisfied video)  [{time.time() - t0:.0f} s]")
         print(f"  {'':<34}{'epochs':>8}{'NDCG@10':>9}{'online':>9}{'later':>9}{'against Chapter 8':>18}")
-        ch8, _ = chapter8_rows(W, sp, R)
+        ch8, _, (n_bad, n_req) = chapter8_rows(W, sp, R, bad)
         base = row_line("Chapter 8's ranker", W, R, ch8, None)
+        pop = B.popularity(W, 23 * DAY)
         for label, top in baseline_rows(W, 23 * DAY, R, H, iv, bad).items():
             row_line(label, W, R, top, base)
         seqs, _ = training_sequences(W, 23 * DAY)
@@ -113,16 +120,20 @@ if __name__ == "__main__":
             ons, nds, ons_l = [], [], []
             for seed in SEEDS:
                 m = fit(SeqModel(n, kind, W["items"], seed=seed), seqs, chosen[(kind, loss)], loss, seed=seed)
-                top = top10(lambda a, b: score(m, H[a:b]), bad)
+                top = top10(lambda a, b: score(m, H[a:b]), bad, tie=pop)
                 on = online(W, R, top)
                 ons.append(on)
                 nds.append(ndcg(R, top))
-            diffs = np.array([paired(o, base)[0] for o in ons])
+            d, se = paired(np.mean(ons, axis=0), base, R["user"])[:2]   # the mean over seeds, users resampled
             means = [o.mean() for o in ons]
             print(f"  {kind + ', ' + loss:<34}{chosen[(kind, loss)]:>8}{np.mean(nds):>9.4f}{np.mean(means):>9.4f}"
                   f"{np.mean([o[later].mean() for o in ons]):>9.4f}"
-                  f"{f'{diffs.mean():+.4f} ({diffs.std(ddof=1) / np.sqrt(len(diffs)):.4f})':>18}"
+                  f"{f'{d:+.4f} ({se:.4f})':>18}"
                   f"   seeds: " + ", ".join(f"{x:.4f}" for x in means) + f"  [{time.time() - t0:.0f} s]")
         print("  (online: expected satisfied plays per row, all test requests; later: requests after the first of "
-              "their visit; against: paired difference over the same requests, standard error in brackets, across "
-              "seeds for the neural models; NDCG@10 and online of the neural models are means over 3 seeds)")
+              "their visit; against: paired difference over the same requests, with its standard error in brackets "
+              "from 1,000 bootstrap draws of whole users; for the neural models, NDCG@10, online and the difference "
+              "are means over 3 seeds, and the seeds' own results are listed)")
+        print(f"  Chapter 8's ranker takes, for each request, the pre-ranker's first 50 videos that the request may "
+              f"show; the snapshot's own 50, kept all week, would have shown {n_bad:,} videos already clicked or "
+              f"otherwise not allowed, in {n_req:,} requests")

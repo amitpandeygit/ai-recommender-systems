@@ -28,6 +28,7 @@ pipeline) use one of the two worlds, without changing any earlier file.
 Needs Python 3.12 or later. Run from the repository root (under a minute):
     python chapter_09/planted_world.py
 """
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -244,6 +245,9 @@ def truth(W, name):
 
 
 if __name__ == "__main__":
+    import platform
+    print(f"Environment: Python {platform.python_version()}, NumPy {np.__version__}, {platform.system()} "
+          f"{platform.machine()}, {os.cpu_count()} CPUs")
     cfg = Config()
     a = tesselo_data.simulate(cfg)
     b = simulate_planted(cfg, Planted(0.0, 0.0, 0.0))
