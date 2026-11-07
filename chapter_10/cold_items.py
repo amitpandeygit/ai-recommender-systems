@@ -25,8 +25,8 @@ clicked them by the cutoff: none, 1 to 4, and 5 or more. The methods:
   PinSage-style       - Listing 10.5: each video's vector computed from its own content
                         and its graph neighbours' content, the neighbours being the
                         videos most likely to be reached in two steps, video to user to
-                        video (an exact version of the random-walk visit counts of Ying
-                        and colleagues, KDD 2018); it is trained with an in-batch
+                        video (a simpler neighbourhood than the random-walk visit counts
+                        of Ying and colleagues, KDD 2018); it is trained with an in-batch
                         softmax on pairs of videos the same user clicked one after the
                         other, not with the paper's max-margin loss and hard negatives
 Each graph model is also tested with the user's language first, as Chapter 8's source
@@ -95,8 +95,8 @@ def kg_edges(W, items_kept, relations, first_node):
 # ---------------------------------------------------------------- Listing 10.5: PinSage
 def walk_neighbours(A, k=10):
     """Each item's k most visited items on a two-step walk item -> user -> item (the
-    visit probabilities, as an exact version of PinSage's counts over many short walks),
-    and their importance weights (summing to 1)."""
+    exact two-step walk scores of this teaching variant; PinSage itself counts visits
+    over many short random walks), and their importance weights (summing to 1)."""
     from graph_models import rp3beta
     P = rp3beta(A, alpha=1.0, beta=0.0)                          # P[i, j]: chance a walk from i ends at j
     nb = np.argsort(-P, axis=1, kind="stable")[:, :k]

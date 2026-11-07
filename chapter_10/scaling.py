@@ -76,16 +76,23 @@ def sampled_batch(A, deg, E0, targets, rng):
     """Two LightGCN layers for a batch of targets, estimated from FANOUT neighbours
     sampled (with replacement) per node and hop. A node's layer k + 1 is the sum over
     its d neighbours n of layer k of n / sqrt(d x d_n); the estimate is that sum over
-    the sample, times d / FANOUT. A node with no neighbours gets zero. deg: the degrees,
-    computed once. Returns the final vectors and the number of distinct nodes read."""
-    def sample(nodes):
-        d = deg[nodes]
-        pick = A.indptr[nodes][:, None] + (rng.random((len(nodes), FANOUT)) * d[:, None]).astype(np.int64)
-        nb = np.where(d[:, None] > 0, A.indices[np.minimum(pick, len(A.indices) - 1)], -1)   # -1: no neighbour
-        w = np.where(nb >= 0, np.sqrt(d)[:, None] / FANOUT / np.sqrt(np.maximum(deg[np.maximum(nb, 0)], 1)), 0.0)
-        return nb, w.astype(np.float32)                          # w: the estimate's weight for each sample
-    nb1, w1 = sample(targets)                                    # targets x FANOUT
-    nb2, w2 = sample(np.maximum(nb1, 0).ravel())
+    the sample, times d / FANOUT. A node with no neighbours is never sampled from and
+    gets zero, at either hop, even in a graph with no edges. deg: the degrees, computed
+    once. Returns the final vectors and the number of distinct nodes read."""
+    def sample(nodes, valid):
+        """FANOUT neighbours of each valid node with neighbours (-1 elsewhere, weight 0).
+        Nodes that are not valid or have no neighbours are never looked up."""
+        nb = np.full((len(nodes), FANOUT), -1, dtype=np.int64)
+        w = np.zeros((len(nodes), FANOUT), dtype=np.float32)
+        live = np.flatnonzero(valid)
+        live = live[deg[nodes[live]] > 0]
+        n, d = nodes[live], deg[nodes[live]]
+        s = A.indices[A.indptr[n][:, None] + (rng.random((len(n), FANOUT)) * d[:, None]).astype(np.int64)]
+        nb[live] = s
+        w[live] = np.sqrt(d)[:, None] / FANOUT / np.sqrt(np.maximum(deg[s], 1))   # the estimate's weight
+        return nb, w
+    nb1, w1 = sample(targets, np.ones(len(targets), dtype=bool))                  # targets x FANOUT
+    nb2, w2 = sample(nb1.ravel(), nb1.ravel() >= 0)              # the second hop only from real neighbours
     nb2, w2 = nb2.reshape(len(targets), FANOUT, FANOUT), w2.reshape(len(targets), FANOUT, FANOUT)
     E0n1 = E0[np.maximum(nb1, 0)]
     layer1 = (w1[:, :, None] * E0n1).sum(axis=1)                 # layer 1 of each target
