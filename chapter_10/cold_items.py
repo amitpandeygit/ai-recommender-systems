@@ -7,22 +7,30 @@ similarity of the video's title words, category and language to the user's histo
 This script asks which graph helps choose that video, and then does the same for
 new products in the shop.
 
-New videos. For each test request (days 23 to 30), each method picks one new video
-the request may show; the result is its expected satisfied plays at slot 4, from the
-hidden taste at that moment, paired against Chapter 8's choice. The methods:
+New videos. A video is "new" while it is below the engagement threshold of Chapter 8's
+pool (fewer than 5 users with a positive implicit score at the snapshot); it may
+already have a few clicks. For each test request (days 23 to 30), each method picks
+one new video the request may show; the result is its expected satisfied plays at
+slot 4, from the hidden taste at that moment, paired against Chapter 8's choice. The
+same is then done within three groups of new videos, by how many consenting users had
+clicked them by the cutoff: none, 1 to 4, and 5 or more. The methods:
 
-  Chapter 8's source  - same language + 0.5 x content similarity (the request's history)
+  Chapter 8's source  - same language + 0.5 x content similarity to the snapshot's
+                        profile of the user: the scores of section 10.8's source
   most clicked        - the new video with the most clicks so far
-  LightGCN            - the click graph only (a new video has 0 to 4 clicked users)
+  LightGCN            - the click graph only
   LightGCN + KG       - the click graph plus the knowledge graph: each video linked to
                         its title words, category, language and creator, so a new
-                        video receives vectors from the entities it shares with others;
-                        also with the user's language first, as Chapter 8's source does
-  PinSage             - Listing 10.5: each video's vector computed from its own content
+                        video receives vectors from the entities it shares with others
+  PinSage-style       - Listing 10.5: each video's vector computed from its own content
                         and its graph neighbours' content, the neighbours being the
-                        videos a short random walk from it visits most (Ying and
-                        colleagues, KDD 2018); it is trained on pairs of videos the
-                        same user clicked one after the other
+                        videos most likely to be reached in two steps, video to user to
+                        video (an exact version of the random-walk visit counts of Ying
+                        and colleagues, KDD 2018); it is trained with an in-batch
+                        softmax on pairs of videos the same user clicked one after the
+                        other, not with the paper's max-margin loss and hard negatives
+Each graph model is also tested with the user's language first, as Chapter 8's source
+does: 1,000 is added to the score of every video in the user's app language.
 
 New products. Shop orders (Chapter 3) of consenting users. Almost every product has 5
 buyers within days, so 150 products, drawn at random (seed cfg.seed + 1010), are
@@ -37,7 +45,7 @@ Settings (epochs) are chosen on the validation week, on the same kind of test wi
 the cutoff at day 16, by NDCG@10 over new items, Chapter 5's rule; LightGCN uses the
 layers chosen in next_video.py.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 45 minutes):
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 50 minutes):
     python chapter_10/cold_items.py
 """
 import os
@@ -54,9 +62,9 @@ import torch.nn.functional as F
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from graph_data import DAY, click_graph, environment, load, outcomes, paired, phase  # noqa: E402
-from graph_models import fit_lightgcn, history_nodes, layer_vectors, request_vectors  # noqa: E402
+from graph_models import fit_lightgcn, graph_degrees, history_nodes, layer_vectors, request_vectors  # noqa: E402
 from seq_data import training_sequences  # noqa: E402
-from similarity_recs import item_features  # noqa: E402
+from similarity_recs import content_scores, item_features  # noqa: E402
 from tesselo_graph import RELATIONS  # noqa: E402
 from metrics import ndcg_at_k  # noqa: E402
 import baselines as B  # noqa: E402
@@ -98,7 +106,7 @@ def walk_neighbours(A, k=10):
 
 
 class PinSage(torch.nn.Module):
-    """Listing 10.5. One graph convolution: h_i = normalise(G [x_i, sum_j w_ij relu(Q x_j)])."""
+    """Listing 10.5. One PinSage-style convolution: h_i = normalise(G [x_i, sum_j w_ij relu(Q x_j)])."""
 
     def __init__(self, n_feat, dim=32, seed=0):
         super().__init__()
@@ -171,11 +179,24 @@ def new_ndcg(R, scores, bad_new, cols):
     return float(np.mean(out)) if out else 0.0, len(out)
 
 
-def video_methods(W, cutoff, R, H, cols, use, epochs=None):
+def chapter8_new_scores(W, S, R, cols):
+    """Chapter 8's "New for you" scores (section 10.8's source, pipeline_test.new_candidates):
+    the user's language first, then the content similarity of each new video to the
+    snapshot's profile of the user."""
+    items, users = W["items"], W["users"]
+    feats = item_features(items, len(items["vec"]))
+    uu, inv = np.unique(R["user"], return_inverse=True)
+    sim = content_scores(S["weight"][uu], feats)[0][:, cols].astype(np.float32)
+    same = (users["language"][uu][:, None] == items["language"][cols][None, :]).astype(np.float32)
+    return (same + 0.5 * sim)[inv]
+
+
+def video_methods(W, cutoff, S, R, H, cols, use, epochs=None):
     """Every method's scores for every request and new video (cols), passed to
     use(name, epoch or seed, scores). With epochs None, the graph models are fitted for
     EPOCHS and checked every EVERY epochs (validation); otherwise each is fitted for its
-    chosen epochs from seeds 0, 1 and 2."""
+    chosen epochs from seeds 0, 1 and 2. Each graph model's scores are passed again with
+    the user's language first."""
     items, users = W["items"], W["users"]
     n_u, n_i = len(users["vec"]), len(items["vec"])
     video = W["video"]
@@ -184,10 +205,12 @@ def video_methods(W, cutoff, R, H, cols, use, epochs=None):
     hist = np.zeros((len(H), n_i), dtype=np.float32)
     for k, h in enumerate(H):
         hist[k, np.unique(h[h >= 0])] = 1.0
-    profile = hist @ feats
-    profile /= np.maximum(np.linalg.norm(profile, axis=1, keepdims=True), 1e-12)
     same = (users["language"][R["user"]][:, None] == items["language"][cols][None, :]).astype(np.float32)
-    use("Chapter 8's source", None, same + 0.5 * profile @ feats[cols].T)
+    use("Chapter 8's source", None, chapter8_new_scores(W, S, R, cols))
+
+    def both(name, key, s):
+        use(name, key, s)
+        use(name + ", same language first", key, s + 1_000.0 * same)
     use("most clicked", None, np.broadcast_to(B.popularity(W, cutoff, days=30)[cols], (len(H), len(cols))))
     u, i = A.nonzero()
     clicks = (u, i + n_u)
@@ -196,18 +219,13 @@ def video_methods(W, cutoff, R, H, cols, use, epochs=None):
         rows = clicks[0] if extra is None else np.r_[clicks[0], extra[0]]
         cols_e = clicks[1] if extra is None else np.r_[clicks[1], extra[1]]
         n_nodes = n_u + n_i + n_extra
-        deg = np.bincount(np.r_[rows, cols_e], minlength=n_nodes)
+        deg = graph_degrees(rows, cols_e, n_nodes)
 
         def scores_of(model, A_hat, deg=deg):
             L, final = layer_vectors(model, A_hat)
             own = np.where((deg[R["user"]] > 0)[:, None], L[0][R["user"]], 0.0)
             return (request_vectors(L, deg, history_nodes(H, n_u), own) @ final[n_u + cols].T).astype(np.float32)
         vn = np.flatnonzero(video) + n_u
-
-        def both(name, key, s):
-            use(name, key, s)
-            if name == "LightGCN + KG":                          # the same scores, the user's language first
-                use(name + ", same language first", key, s + 1_000.0 * same)
         if epochs is None:
             fit_lightgcn((rows, cols_e), n_nodes, n_u, vn, layers=LAYERS, epochs=EPOCHS, every=EVERY,
                          after=lambda e, m, Ah, name=name, f=scores_of: both(name, e, f(m, Ah)))
@@ -224,10 +242,10 @@ def video_methods(W, cutoff, R, H, cols, use, epochs=None):
         return (U @ V[cols].T).astype(np.float32)
     if epochs is None:
         fit_pinsage(feats, nb, w, pairs, EPOCHS, every=EVERY,
-                    after=lambda e, V: use("PinSage", e, ps_scores(V)))
+                    after=lambda e, V: both("PinSage-style", e, ps_scores(V)))
     else:
         for seed in SEEDS:
-            use("PinSage", seed, ps_scores(fit_pinsage(feats, nb, w, pairs, epochs["PinSage"], seed=seed)))
+            both("PinSage-style", seed, ps_scores(fit_pinsage(feats, nb, w, pairs, epochs["PinSage-style"], seed=seed)))
 
 
 # ---------------------------------------------------------------- new products
@@ -280,7 +298,7 @@ def product_methods(W, pairs, bought, test_users, epochs=None, after=None, feats
         rows = buys[0] if extra is None else np.r_[buys[0], extra[0]]
         cols = buys[1] if extra is None else np.r_[buys[1], extra[1]]
         n_nodes = n_u + n_i + n_extra
-        deg = np.bincount(np.r_[rows, cols], minlength=n_nodes)
+        deg = graph_degrees(rows, cols, n_nodes)
         nbrs = [np.array(sorted(bought.get(int(u), [])), dtype=np.int64) + n_u for u in test_users]
 
         def scores_of(model, A_hat):
@@ -332,7 +350,7 @@ if __name__ == "__main__":
     def check(name, e, s):
         if e is not None and "same language" not in name:
             curves.setdefault(name, []).append((e, new_ndcg(Rv, s, bv, cols16)[0]))
-    video_methods(W, 16 * DAY, Rv, Hv, cols16, check)
+    video_methods(W, 16 * DAY, S16, Rv, Hv, cols16, check)
     n_val = new_ndcg(Rv, np.zeros(bv.shape), bv, cols16)[1]
     print(f"\nNew videos, validation week: {len(cols16):,} new videos at day 16; {n_val:,} requests with a "
           f"satisfied new video. NDCG@10 over new videos after each check (epochs)")
@@ -350,17 +368,24 @@ if __name__ == "__main__":
     R, H, _, bad = phase(W, 23, S)
     bn = bad[:, cols]
     del bad
-    res = {}
+    clicked = click_graph(W, 23 * DAY).getnnz(axis=0)[cols]     # consenting users who had clicked each new video
+    groups = {"no clicks": clicked == 0, "1 to 4 users": (clicked >= 1) & (clicked <= 4),
+              "5 or more users": clicked >= 5}
+    res, res_g = {}, {}
 
     def collect(name, seed, s):
         choice = new_video_choice(s, bn, cols)
         res.setdefault(name, []).append((slot_plays(W, R, choice), new_ndcg(R, s, bn, cols)[0], choice))
-    video_methods(W, 23 * DAY, R, H, cols, collect, epochs=ep)
+        for gname, gm in groups.items():                         # the same choice within each group
+            res_g.setdefault((name, gname), []).append(slot_plays(W, R, new_video_choice(s[:, gm], bn[:, gm],
+                                                                                          cols[gm])))
+    video_methods(W, 23 * DAY, S, R, H, cols, collect, epochs=ep)
     is_new = set(cols.tolist())
     print(f"\nNew videos, test week: {len(cols):,} of {W['video'].sum():,} videos are new at day 23 "
           f"({np.mean([any(i in is_new for i in p) for p in R['pos']]):.1%} of requests have a satisfied "
-          f"new video); {(~bn).any(axis=1).mean():.1%} of {len(R['user']):,} requests may show at least one  "
-          f"[{time.time() - t0:.0f} s]")
+          f"new video); {(~bn).any(axis=1).mean():.1%} of {len(R['user']):,} requests may show at least one. "
+          f"Consenting users who had clicked them: " + ", ".join(f"{g} {m.sum():,}" for g, m in groups.items())
+          + f"; at most {clicked.max()}  [{time.time() - t0:.0f} s]")
     print(f"  {'':<38}{'epochs':>8}{'NDCG@10 new':>13}{'slot-4 plays':>14}{'against Chapter 8':>20}"
           f"{'same language':>15}")
     base = None
@@ -380,7 +405,20 @@ if __name__ == "__main__":
           "at the request; against: paired difference over the same requests, standard error from 1,000 bootstrap "
           "draws of whole users; same language: share of chosen videos in the user's app language, first seed; "
           "graph models are means over seeds 0, 1 and 2)")
-    del R, H, bn, res
+    print("\nThe same choice within each group of new videos (slot-4 plays; against Chapter 8's source in the same "
+          "group, standard error in brackets)")
+    print(f"  {'':<38}" + "".join(f"{g + ' (' + format(m.sum(), ',') + ')':>30}" for g, m in groups.items()))
+    for name in res:
+        cells = []
+        for gname in groups:
+            plays = np.mean(res_g[(name, gname)], axis=0)
+            if name == "Chapter 8's source":
+                cells.append(f"{plays.mean():.4f}")
+            else:
+                d, se = paired(plays, np.mean(res_g[("Chapter 8's source", gname)], axis=0), R["user"])[:2]
+                cells.append(f"{plays.mean():.4f} {d:+.4f} ({se:.4f})")
+        print(f"  {name:<38}" + "".join(f"{c:>30}" for c in cells))
+    del R, H, bn, res, res_g
 
     # ---- new products
     sys.path.insert(0, str(HERE.parent / "chapter_03"))

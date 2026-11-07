@@ -9,13 +9,18 @@ float32) on this workspace's two CPU cores:
   full propagation    - every node, every layer: A_hat times the vectors, twice.
                         This is what LightGCN does at every training step, and what
                         an offline job does to precompute every vector
-  neighbour sampling  - GraphSAGE and PinSage: a batch of 1,024 target nodes, each
-                        with 10 sampled neighbours, each of those with 10 of its own;
-                        only those nodes are read
+  neighbour sampling  - the same two LightGCN layers, estimated as GraphSAGE and
+                        PinSage do it: a batch of 1,024 target nodes, each with 10
+                        sampled neighbours, each of those with 10 of its own; only
+                        those nodes are read. Each sum over neighbours is estimated
+                        from the sample (scaled by degree / 10, so that on average it
+                        equals the full sum), and the result is compared with the
+                        exact vectors
   request time        - Listing 10.4: with every node's layer vectors precomputed,
                         a user's vector from its 50 most recent items
 
-It reports time, memory and how many nodes each method reads. The graph is random,
+It reports time, memory, how many nodes each method reads, and how close the sampled
+vectors come to the exact ones. The graph is random,
 not a model of Tesselo: only the costs mean something. Timings depend on the
 machine; compare them with each other.
 
@@ -67,20 +72,27 @@ def full_propagation(A, E0):
     return out / (LAYERS + 1)
 
 
-def sampled_batch(A, E0, targets, rng):
-    """Two-hop neighbour sampling for a batch of targets (a mean of FANOUT sampled
-    neighbours per hop, as a GraphSAGE layer would aggregate them). Returns the
-    vectors and the number of distinct nodes read."""
+def sampled_batch(A, deg, E0, targets, rng):
+    """Two LightGCN layers for a batch of targets, estimated from FANOUT neighbours
+    sampled (with replacement) per node and hop. A node's layer k + 1 is the sum over
+    its d neighbours n of layer k of n / sqrt(d x d_n); the estimate is that sum over
+    the sample, times d / FANOUT. A node with no neighbours gets zero. deg: the degrees,
+    computed once. Returns the final vectors and the number of distinct nodes read."""
     def sample(nodes):
-        start, size = A.indptr[nodes], np.diff(A.indptr)[nodes]
-        pick = start[:, None] + (rng.random((len(nodes), FANOUT)) * np.maximum(size, 1)[:, None]).astype(np.int64)
-        return A.indices[np.minimum(pick, len(A.indices) - 1)]
-    hop1 = sample(targets)                                       # targets x FANOUT
-    hop2 = sample(hop1.ravel()).reshape(len(targets), FANOUT, FANOUT)
-    h1 = (E0[hop1] + E0[hop2].mean(axis=2)) / 2                  # each neighbour from its own neighbours
-    vec = (E0[targets] + h1.mean(axis=1)) / 2
-    read = len(np.unique(np.r_[targets, hop1.ravel(), hop2.ravel()]))
-    return vec, read
+        d = deg[nodes]
+        pick = A.indptr[nodes][:, None] + (rng.random((len(nodes), FANOUT)) * d[:, None]).astype(np.int64)
+        nb = np.where(d[:, None] > 0, A.indices[np.minimum(pick, len(A.indices) - 1)], -1)   # -1: no neighbour
+        w = np.where(nb >= 0, np.sqrt(d)[:, None] / FANOUT / np.sqrt(np.maximum(deg[np.maximum(nb, 0)], 1)), 0.0)
+        return nb, w.astype(np.float32)                          # w: the estimate's weight for each sample
+    nb1, w1 = sample(targets)                                    # targets x FANOUT
+    nb2, w2 = sample(np.maximum(nb1, 0).ravel())
+    nb2, w2 = nb2.reshape(len(targets), FANOUT, FANOUT), w2.reshape(len(targets), FANOUT, FANOUT)
+    E0n1 = E0[np.maximum(nb1, 0)]
+    layer1 = (w1[:, :, None] * E0n1).sum(axis=1)                 # layer 1 of each target
+    layer1_n = (w2[:, :, :, None] * E0[np.maximum(nb2, 0)]).sum(axis=2)   # layer 1 of each sampled neighbour
+    layer2 = (w1[:, :, None] * layer1_n).sum(axis=1)             # layer 2 of each target
+    read = len(np.unique(np.r_[targets, nb1[nb1 >= 0], nb2[nb2 >= 0]]))
+    return (E0[targets] + layer1 + layer2) / (LAYERS + 1), read
 
 
 def request_time(L, deg, histories):
@@ -103,7 +115,8 @@ if __name__ == "__main__":
           f"degree: users mean {deg[:N_USERS].mean():.1f}, max {deg[:N_USERS].max():,.0f}; items median "
           f"{np.median(deg[N_USERS:]):.0f}, max {deg[N_USERS:].max():,.0f}  [{time.time() - t0:.0f} s]")
     print(f"Memory: normalised adjacency {(A.data.nbytes + A.indices.nbytes + A.indptr.nbytes) / 1e9:.2f} GB; "
-          f"one layer of vectors {n * DIM * 4 / 1e9:.2f} GB")
+          f"one layer of vectors {n * DIM * 4 / 1e9:.2f} GB, so {LAYERS + 1} layers "
+          f"{(LAYERS + 1) * n * DIM * 4 / 1e9:.2f} GB")
     E0 = rng.normal(0, 0.1, (n, DIM)).astype(np.float32)
 
     t = time.perf_counter()
@@ -113,15 +126,26 @@ if __name__ == "__main__":
           f"({t_full / n * 1e6:.2f} microseconds per node); reads every edge {LAYERS} times")
 
     t = time.perf_counter()
-    reads = []
+    reads, cos, tgts = [], [], []
     for _ in range(20):
         targets = rng.integers(0, n, BATCH)
-        _, read = sampled_batch(A, E0, targets, rng)
+        vec, read = sampled_batch(A, deg, E0, targets, rng)
         reads.append(read)
-    t_batch = (time.perf_counter() - t) / 20
+        prop = (LAYERS + 1) * vec - E0[targets]                  # layers 1 and 2 only: the sampled part
+        ex = (LAYERS + 1) * final[targets] - E0[targets]
+        cos.append((prop * ex).sum(axis=1) / np.maximum(np.linalg.norm(prop, axis=1) * np.linalg.norm(ex, axis=1),
+                                                        1e-12))
+        tgts.append(targets)
+    t_batch = (time.perf_counter() - t) / 20                     # (the comparison with the exact vectors is cheap)
+    cos, tgts = np.concatenate(cos), np.concatenate(tgts)
+    iso = deg[tgts] == 0
     print(f"Neighbour sampling, fan-out {FANOUT} x {FANOUT}: {t_batch * 1e3:.1f} ms per batch of {BATCH:,} targets "
           f"({t_batch / BATCH * 1e6:.1f} microseconds per target); {np.mean(reads):,.0f} distinct nodes read per "
           f"batch, {np.mean(reads) / BATCH:.0f} per target; all nodes this way: {t_batch / BATCH * n:.0f} s")
+    print(f"  Sampled against exact, layers 1 and 2 of the {(~iso).sum():,} targets with neighbours: cosine "
+          f"similarity median {np.median(cos[~iso]):.3f}, 10th percentile {np.percentile(cos[~iso], 10):.3f}; the "
+          f"{iso.sum():,} targets with no neighbours get no layers 1 and 2, as in the exact vectors. Isolated "
+          f"nodes in the graph: {(deg == 0).sum():,}")
 
     e = E0
     L = [E0]

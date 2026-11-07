@@ -14,7 +14,8 @@ method gets the request's fresh history:
   RP3beta        - three-step random walks, popular end points penalised
   LightGCN       - propagated node vectors; the user vector is rebuilt from the
                    request's history (graph_models.request_vectors)
-  SimGCL         - LightGCN trained with a contrastive loss between noisy views
+  SimGCL         - LightGCN trained with a contrastive loss between noisy views; as
+                   in the SimGCL paper, layer 0 is left out of every final vector
 
 It is compared with Chapter 8's ranker, as in Chapter 9. Settings are chosen on
 the validation week (fitted on what had arrived by day 16, tested on the requests of
@@ -40,8 +41,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from graph_data import (DAY, chapter8_rows, click_graph, environment, load, ndcg, paired, phase, row_line,  # noqa: E402
                         top10)
-from graph_models import (fit_lightgcn, history_nodes, ials_fold_in, layer_vectors, request_vectors,  # noqa: E402
-                          rp3beta, two_tower_scores, walk_scores)
+from graph_models import (check_fold_in, fit_lightgcn, graph_degrees, history_nodes, ials_fold_in,  # noqa: E402
+                          layer_vectors, request_vectors, rp3beta, two_tower_scores, walk_scores)
 import baselines as B  # noqa: E402
 from seq_data import training_sequences  # noqa: E402
 from slate_data import split  # noqa: E402
@@ -66,7 +67,7 @@ def gcn_scores(model, A_hat, deg, H, users, n_users, n_items):
     item_vec = final[n_users:n_users + n_items]
     own = np.where((deg[users] > 0)[:, None], L[0][users], 0.0)  # an unseen user has no vector of its own
     nb = history_nodes(H, n_users)
-    U = request_vectors(L, deg, nb, own)
+    U = request_vectors(L, deg, nb, own, first=model.first)
     return lambda a, b: U[a:b] @ item_vec.T
 
 
@@ -100,7 +101,7 @@ if __name__ == "__main__":
         curve = []
 
         def check(epoch, model, A_hat, curve=curve):
-            deg = np.bincount(np.r_[e16[0], e16[1]], minlength=n_nodes)
+            deg = graph_degrees(*e16, n_nodes)
             f = gcn_scores(model, A_hat, deg, Hv, Rv["user"], n_u, n_i)
             curve.append((epoch, ndcg(Rv, top10(f, badv, tie=pop16))))
         fit_lightgcn(e16, n_nodes, n_u, video_nodes, layers=layers, epochs=EPOCHS, every=EVERY, after=check)
@@ -115,7 +116,7 @@ if __name__ == "__main__":
         curve = []
 
         def check(epoch, model, A_hat, curve=curve):
-            deg = np.bincount(np.r_[e16[0], e16[1]], minlength=n_nodes)
+            deg = graph_degrees(*e16, n_nodes)
             f = gcn_scores(model, A_hat, deg, Hv, Rv["user"], n_u, n_i)
             curve.append((epoch, ndcg(Rv, top10(f, badv, tie=pop16))))
         fit_lightgcn(e16, n_nodes, n_u, video_nodes, layers=lay, epochs=CL_EPOCHS, cl=cl, every=CL_EVERY,
@@ -134,7 +135,7 @@ if __name__ == "__main__":
     R, H, iv, bad = phase(W, 23, sp["S"])
     A = click_graph(W, 23 * DAY)
     e23 = edges_of(A, n_u)
-    deg23 = np.bincount(np.r_[e23[0], e23[1]], minlength=n_nodes)
+    deg23 = graph_degrees(*e23, n_nodes)
     pop = B.popularity(W, 23 * DAY)
     print(f"\nTest week: {len(R['user']):,} requests; graph at day 23: {(A.getnnz(axis=1) > 0).sum():,} users and "
           f"{(A.getnnz(axis=0) > 0).sum():,} videos linked, {A.nnz:,} user-video edges  [{time.time() - t0:.0f} s]")
@@ -153,11 +154,13 @@ if __name__ == "__main__":
     row_line("RP3beta", W, R, top10(lambda a, b: walk_scores(Wm, H[a:b]), bad, tie=pop), base,
              extra=f"{best_rp3[0]}, {best_rp3[1]}")
     print(f"  [{time.time() - t0:.0f} s]")
+    errs = []
     for label, kw, setting in (("LightGCN", dict(layers=lay, epochs=ep), f"{lay}, {ep}"),
                                ("SimGCL", dict(layers=lay, epochs=ep_cl, cl=cl), f"{cl}, {ep_cl}")):
         ons, nds = [], []
         for seed in SEEDS:
             model, A_hat = fit_lightgcn(e23, n_nodes, n_u, video_nodes, seed=seed, **kw)
+            errs.append(check_fold_in(model, A_hat, e23, n_nodes, np.arange(n_u)))   # same graph: trained vectors
             top = top10(gcn_scores(model, A_hat, deg23, H, R["user"], n_u, n_i), bad, tie=pop)
             on = row_line(f"{label}, seed {seed}", W, R, top, base, extra=setting)
             ons.append(on)
@@ -166,6 +169,8 @@ if __name__ == "__main__":
         later = R["place"] >= 1
         print(f"  {label + ', mean of 3 seeds':<36}{setting:>10}{np.mean(nds):>9.4f}{np.mean(ons):>9.4f}"
               f"{np.mean(ons, axis=0)[later].mean():>9.4f}{f'{d:+.4f} ({se:.4f})':>18}  [{time.time() - t0:.0f} s]")
+    print(f"  Fold-in check: with the graph unchanged, request-time fold-in rebuilds every user's trained vector "
+          f"(largest difference over all users and seeds {max(errs):.1e})")
     print("  (online: expected satisfied plays per row, all test requests; later: requests after the first of "
           "their visit; against: paired difference over the same requests, with its standard error in brackets "
           "from 1,000 bootstrap draws of whole users; setting: RP3beta's alpha and beta, LightGCN's layers and "

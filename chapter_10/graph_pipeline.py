@@ -16,11 +16,13 @@ not allow. The arms:
   + graph "New for you"     - A, with the slot-4 video chosen by section 10.5's
                              knowledge-graph model, the user's language first,
                              instead of Chapter 8's source
-  control: no follows       - the blended score with LightGCN on the click graph alone
+  control: no follows       - the blended score with section 10.6's LightGCN + creators:
+                             the same graph without the follows
+  control: clicks only      - the blended score with LightGCN on the click graph alone
 
 The graph model is section 10.6's LightGCN + follows: users, videos and creators, with
-clicks, follows and authorship, each request's user vector built from what the user
-had clicked and followed before it. Each blend is a logistic regression on held-out
+clicks, follows and authorship, each request's user vector folded in from what the
+user had clicked and followed, and who had followed the user, before it. Each blend is a logistic regression on held-out
 impressions of the validation week (every model fitted on what had arrived by day
 16), as in sections 8.4 and 9.7, on five inputs: a constant, the heavy ranker's
 logit, the graph score, whether the user had clicked at most 2 different videos
@@ -30,7 +32,7 @@ can grow where the user's own clicks say little.
 Differences against A are paired over the same requests, with standard errors and 95%
 intervals from 1,000 bootstrap draws of whole users.
 
-Needs Python 3.12 or later, PyTorch and pyroaring. Run from the repository root (about 17 minutes):
+Needs Python 3.12 or later, PyTorch and pyroaring. Run from the repository root (about 25 minutes):
     python chapter_10/graph_pipeline.py
 """
 import os
@@ -44,9 +46,9 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from graph_data import (DAY, click_graph, environment, exclude_mask, histories, load, ndcg, outcomes,  # noqa: E402
-                        own_follows, paired, requests)
-from graph_models import fit_lightgcn, history_nodes, layer_vectors, request_vectors  # noqa: E402
+from graph_data import (DAY, check_shared_graph, click_graph, environment, exclude_mask, histories, load,  # noqa: E402
+                        ndcg, outcomes, own_followers, own_follows, paired, requests)
+from graph_models import fit_lightgcn, graph_degrees, history_nodes, layer_vectors, request_vectors  # noqa: E402
 from social import FEW, gcn_scores, graphs, neighbours_now  # noqa: E402
 from cold_items import LAYERS, VIDEO_RELATIONS, kg_edges, new_video_choice  # noqa: E402
 from seq_data import eligible_kept, forbidden_shown, ranked_pools  # noqa: E402
@@ -61,7 +63,7 @@ from slates import ad_setup, best_ads, check_rows  # noqa: E402
 from two_tower import guardrails  # noqa: E402
 
 EXTRA = 50                                     # graph candidates added per request
-EPOCHS = {"LightGCN": 240, "LightGCN + follows": 260, "LightGCN + KG": 240}   # validation choices of sections 10.4 to 10.6
+EPOCHS = {"LightGCN": 240, "LightGCN + creators": 300, "LightGCN + follows": 300, "LightGCN + KG": 240}   # validation choices of sections 10.4 to 10.6
 
 
 def features(heavy_p, g, few):
@@ -70,16 +72,17 @@ def features(heavy_p, g, few):
     return np.stack([np.ones_like(heavy_p), logit(heavy_p), g, f * np.ones_like(heavy_p), f * g], axis=-1)
 
 
-def graph_scorers(W, cutoff, R, H, fol, cre, seed=0):
+def graph_scorers(W, cutoff, R, H, links, seed=0):
     """f(a, b) -> graph scores of every video for requests a to b, for the graph model
-    and the no-follows control."""
+    and the two controls. links: each request's followees, creators followed and followers."""
     n_u, n_i = len(W["users"]["vec"]), len(W["items"]["vec"])
     vn = np.flatnonzero(W["video"]) + n_u
     out = {}
     for name, ((edges, n_nodes), soc) in graphs(W, cutoff).items():
-        deg = np.bincount(np.r_[edges[0], edges[1]], minlength=n_nodes)
+        check_shared_graph(W, edges)
+        deg = graph_degrees(*edges, n_nodes)
         m, A_hat = fit_lightgcn(edges, n_nodes, n_u, vn, layers=LAYERS, epochs=EPOCHS[name], seed=seed)
-        out[name] = gcn_scores(m, A_hat, deg, neighbours_now(W, H, fol, cre, soc), R["user"], n_u, n_i)
+        out[name] = gcn_scores(m, A_hat, deg, neighbours_now(W, H, links, soc), R["user"], n_u, n_i)
     return out
 
 
@@ -91,7 +94,7 @@ def kg_new_scores(W, cutoff, R, H, cols, seed=0):
     kg, n_ent = kg_edges(W, np.flatnonzero(W["video"]), VIDEO_RELATIONS, n_u + n_i)
     rows, cols_e = np.r_[u, kg[0]], np.r_[i + n_u, kg[1]]
     n_nodes = n_u + n_i + n_ent
-    deg = np.bincount(np.r_[rows, cols_e], minlength=n_nodes)
+    deg = graph_degrees(rows, cols_e, n_nodes)
     m, A_hat = fit_lightgcn((rows, cols_e), n_nodes, n_u, np.flatnonzero(W["video"]) + n_u, layers=LAYERS,
                             epochs=EPOCHS["LightGCN + KG"], seed=seed)
     L, final = layer_vectors(m, A_hat)
@@ -106,12 +109,12 @@ def fit_blends(W):
     sp = split(W, "validation")
     Rv = requests(W, 16, 23)
     Hv, ivv = histories(W, Rv)
-    fv, cv = own_follows(W, Rv)
+    links = (*own_follows(W, Rv), own_followers(W, Rv))
     few = np.array([len(np.unique(h[h >= 0])) <= FEW for h in Hv])
     rows, cand, y = heldout_rows(W, Rv, Hv, ivv)
     hp = score_pools(sp["heavy"], sp["S"], W["users"], W["items"], Rv["user"][rows], cand[:, None])[:, 0]
     weights = {}
-    for name, f in graph_scorers(W, 16 * DAY, Rv, Hv, fv, cv).items():
+    for name, f in graph_scorers(W, 16 * DAY, Rv, Hv, links).items():
         g = np.empty(len(rows))
         for a in range(0, len(Rv["user"]), 2_048):
             sel = (rows >= a) & (rows < a + 2_048)
@@ -138,9 +141,9 @@ if __name__ == "__main__":
     R = requests(W, 23, 30)
     H, iv = histories(W, R)
     bad = exclude_mask(W, S, R, H)
-    fol, cre = own_follows(W, R)
+    links = (*own_follows(W, R), own_followers(W, R))
     few = np.array([len(np.unique(h[h >= 0])) <= FEW for h in H])
-    scorers = graph_scorers(W, 23 * DAY, R, H, fol, cre)
+    scorers = graph_scorers(W, 23 * DAY, R, H, links)
     rl = rules(W["cfg"], users, items)
     rs = RuleSets(rl, [np.flatnonzero(S["used"][u]) for u in range(len(users["vec"]))], n, "numpy")
     uu, inv = np.unique(R["user"], return_inverse=True)
@@ -182,7 +185,8 @@ if __name__ == "__main__":
                     arms.setdefault(("50", "heavy", "kg"), []).append(assemble_rows(cands, rel, nk, ad[a:b], items))
     labels = {("50", "heavy", "8"): "A: Chapter 8's row", ("100", "heavy", "8"): "+ graph candidates",
               ("50", graph, "8"): "+ blended score", ("100", graph, "8"): "+ both",
-              ("50", "heavy", "kg"): "+ graph New for you", ("50", "LightGCN", "8"): "control: no follows"}
+              ("50", "heavy", "kg"): "+ graph New for you", ("50", "LightGCN + creators", "8"): "control: no follows",
+              ("50", "LightGCN", "8"): "control: clicks only"}
     later = R["place"] >= 1
     ok = S["ok"]
     tc = top_creators(W, S)
@@ -213,10 +217,13 @@ if __name__ == "__main__":
         print(f"  {label:<24}{ndcg(R, top):>9.4f}{cov:>10.1%}{cr:>12.1%}{on.mean():>9.4f}{on[few].mean():>12.4f}"
               f"{d:>18}{ci:>20}{df:>19}{new_plays:>11.4f}{rev.mean():>9.4f}{breaks:>13}{shown_bad:>13}")
         res[label] = on
-    blend, ctrl = res["+ blended score"], res["control: no follows"]
-    print("  The blend against the no-follows control (paired, users resampled): all requests "
-          "{:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]; ".format(*paired(blend, ctrl, R["user"]))
-          + "few clicks {:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(*paired(blend[few], ctrl[few], R["user"][few])))
+    blend = res["+ blended score"]
+    for lbl in ("control: no follows", "control: clicks only"):
+        ctrl = res[lbl]
+        print(f"  The blend against {lbl[9:]} (paired, users resampled): all requests "
+              "{:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]; ".format(*paired(blend, ctrl, R["user"]))
+              + "few clicks {:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(*paired(blend[few], ctrl[few],
+                                                                              R["user"][few])))
     lang = users["language"][R["user"]]
     print("  online by app language: " + "  ".join(
         f"{LANGUAGES[g]} ({(lang == g).sum():,}): " + "/".join(f"{res[lbl][lang == g].mean():.4f}" for lbl in res)

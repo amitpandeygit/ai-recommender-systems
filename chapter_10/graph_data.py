@@ -102,6 +102,46 @@ def own_follows(W, R):
     return out[0], out[1]
 
 
+def own_followers(W, R):
+    """For each request: the accounts that had followed the user before it was served,
+    when that follow edge may be in the shared graph (both accounts consenting and not
+    private). With them, a user's links at the request are the same kinds of links the
+    user had in the trained graph."""
+    g, ok = W["graph"], usable(W)
+    e = g["user_follows"]
+    order = np.argsort(e["dst"], kind="stable")
+    src, dst, t = e["src"][order], e["dst"][order], e["t"][order]
+    start = np.searchsorted(dst, np.arange(len(W["users"]["vec"]) + 1))
+    out = []
+    for u, tt in zip(R["user"], R["time"]):
+        if not ok[u]:
+            out.append(np.zeros(0, dtype=src.dtype))
+            continue
+        a, b = start[u], start[u + 1]
+        s = src[a:b][t[a:b] < tt]
+        out.append(s[ok[s]])
+    return out
+
+
+def check_shared_graph(W, edges):
+    """The privacy rules, checked on the edges of a graph that every user's recommendations
+    are computed from: every follow edge between two consenting, non-private accounts,
+    every creator follow from one, every click from a consenting user. Returns the click
+    edges and accounts that come from private (consenting) users, whose clicks are
+    pooled like every consenting user's."""
+    n_u, n_i = len(W["users"]["vec"]), len(W["items"]["vec"])
+    rows, cols = np.asarray(edges[0]), np.asarray(edges[1])
+    ok, consent, private = usable(W), W["users"]["current_consent"], W["graph"]["private"]
+    uu = (rows < n_u) & (cols < n_u)
+    uc = (rows < n_u) & (cols >= n_u + n_i)
+    ui = (rows < n_u) & (cols >= n_u) & (cols < n_u + n_i)
+    assert ok[rows[uu]].all() and ok[cols[uu]].all(), "a follow edge with a private or non-consenting account"
+    assert ok[rows[uc]].all(), "a creator follow from a private or non-consenting account"
+    assert consent[rows[ui]].all(), "a click from a non-consenting user"
+    priv = ui & private[np.minimum(rows, n_u - 1)]
+    return int(priv.sum()), len(np.unique(rows[priv]))
+
+
 def row_line(label, W, R, top, base, extra="", rows=None):
     """One results line: NDCG@10, expected satisfied plays per row, the same for later
     requests, and the paired difference against base (users resampled)."""
@@ -122,4 +162,4 @@ def row_line(label, W, R, top, base, extra="", rows=None):
 
 __all__ = ["DAY", "WORLDS", "chapter8_rows", "environment", "exclude_mask", "histories", "known", "ndcg", "online",
            "outcomes", "paired", "requests", "top10", "load", "phase", "click_graph", "usable", "social_edges",
-           "own_follows", "row_line"]
+           "own_follows", "own_followers", "check_shared_graph", "row_line"]

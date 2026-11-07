@@ -4,14 +4,21 @@
                              walks on the user-item graph, with popular items
                              penalised (Paudel and colleagues, 2016)
   normalised_adjacency()   - D^-1/2 A D^-1/2 of a graph, as a sparse tensor
+  graph_degrees()          - each node's degree in that same graph, every pair of
+                             linked nodes counted once (training and request time
+                             must use the same degrees)
   LightGCN                 - Listing 10.3. Free vectors for every node, propagated
                              over the graph without weights or non-linearities, and
                              the mean of the layers (He and colleagues, SIGIR 2020)
   fit_lightgcn()           - BPR training on the user-video edges, with SimGCL's
-                             noise views as an option (Yu and colleagues, SIGIR 2022)
-  request_vectors()        - Listing 10.4. A user's vector at request time, from the
-                             nodes they link to now (videos clicked, accounts followed)
-                             and the trained vectors of those nodes
+                             noise views as an option (Yu and colleagues, SIGIR 2022);
+                             as in that paper, SimGCL leaves layer 0 out of every
+                             final vector
+  request_vectors()        - Listing 10.4. Request-time fold-in: a user's vector from
+                             the nodes they link to now (videos clicked, accounts
+                             followed) and the frozen, trained layers of those nodes
+  check_fold_in()          - with the graph unchanged, request_vectors must rebuild
+                             every user's trained vector exactly
   ials_fold_in()           - Chapter 4's iALS on the same edges, with each request's
                              user vector solved from its history
   two_tower_scores()       - Chapter 6's two-tower model (its chosen settings), with the
@@ -65,12 +72,24 @@ def walk_scores(Wm, H):
 
 
 # ---------------------------------------------------------------- section 10.4: LightGCN
-def normalised_adjacency(rows, cols, n_nodes):
-    """Symmetric D^-1/2 A D^-1/2 for undirected edges (rows[k], cols[k]), and the degrees."""
+def symmetric_adjacency(rows, cols, n_nodes):
+    """The 0/1 adjacency of undirected edges (rows[k], cols[k]): an edge given twice, or
+    in both directions (two users who follow each other), counts once."""
     r = np.r_[rows, cols]
     c = np.r_[cols, rows]
     A = sparse.coo_matrix((np.ones(len(r)), (r, c)), shape=(n_nodes, n_nodes)).tocsr()
-    A.data[:] = 1.0                                              # an edge counts once
+    A.data[:] = 1.0
+    return A
+
+
+def graph_degrees(rows, cols, n_nodes):
+    """Each node's number of neighbours in the graph that training propagates over."""
+    return np.diff(symmetric_adjacency(rows, cols, n_nodes).indptr).astype(np.float64)
+
+
+def normalised_adjacency(rows, cols, n_nodes):
+    """Symmetric D^-1/2 A D^-1/2 for undirected edges (rows[k], cols[k]), and the degrees."""
+    A = symmetric_adjacency(rows, cols, n_nodes)                 # an edge counts once
     deg = np.asarray(A.sum(axis=1)).ravel()
     inv = 1.0 / np.sqrt(np.maximum(deg, 1))
     Ah = (sparse.diags(inv) @ A @ sparse.diags(inv)).tocoo()
@@ -81,14 +100,16 @@ def normalised_adjacency(rows, cols, n_nodes):
 
 
 class LightGCN(torch.nn.Module):
-    """Listing 10.3. e^(k+1) = A_hat e^(k); the final vector is the mean of e^(0) ... e^(K)."""
+    """Listing 10.3. e^(k+1) = A_hat e^(k); the final vector is the mean of e^(0) ... e^(K)
+    (of e^(1) ... e^(K) with skip0, as SimGCL does)."""
 
-    def __init__(self, n_nodes, dim=32, layers=2, seed=0):
+    def __init__(self, n_nodes, dim=32, layers=2, seed=0, skip0=False):
         super().__init__()
         torch.manual_seed(seed)
         self.emb = torch.nn.Embedding(n_nodes, dim)
         torch.nn.init.normal_(self.emb.weight, std=0.1)
         self.layers = layers
+        self.first = 1 if skip0 else 0                           # the first layer in the mean
 
     def propagate(self, A_hat, eps=0.0):
         """All layers. eps > 0 adds SimGCL's noise: at each layer, a random vector of
@@ -103,7 +124,7 @@ class LightGCN(torch.nn.Module):
         return out
 
     def final(self, A_hat, eps=0.0):
-        return torch.stack(self.propagate(A_hat, eps), dim=0).mean(dim=0)
+        return torch.stack(self.propagate(A_hat, eps)[self.first:], dim=0).mean(dim=0)
 
 
 def info_nce(a, b, tau=0.2):
@@ -117,12 +138,13 @@ def fit_lightgcn(edges, n_nodes, n_users, video_nodes, layers=2, dim=32, epochs=
     """BPR on the user-video edges (one negative video per positive, uniform), with
     the whole graph propagated at every step. edges: all undirected edges of the
     graph (rows, cols); the user-video ones are those with a user end. cl > 0 adds
-    SimGCL's loss: two noisy views of the batch's users and videos, pulled together."""
+    SimGCL's loss: two noisy views of the batch's users and videos, pulled together,
+    and leaves layer 0 out of every final vector, as the SimGCL paper does."""
     rows, cols = edges
     A_hat, _ = normalised_adjacency(rows, cols, n_nodes)
     uv = (rows < n_users) & np.isin(cols, video_nodes)
     pu, pi = rows[uv], cols[uv]
-    model = LightGCN(n_nodes, dim, layers, seed)
+    model = LightGCN(n_nodes, dim, layers, seed, skip0=cl > 0)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     rng = np.random.default_rng(seed)
     for epoch in range(1, epochs + 1):
@@ -152,17 +174,19 @@ def layer_vectors(model, A_hat):
     """Every node's vector at every layer, and the final (mean) vectors, as NumPy arrays."""
     with torch.no_grad():
         L = [x.numpy().astype(np.float64) for x in model.propagate(A_hat)]
-    return L, np.mean(L, axis=0)
+    return L, np.mean(L[model.first:], axis=0)
 
 
-def request_vectors(L, deg, neighbours, own=None):
-    """Listing 10.4. Each request's user vector, from the nodes it links to now.
+def request_vectors(L, deg, neighbours, own=None, first=0):
+    """Listing 10.4. Request-time fold-in: each request's user vector, from the nodes it
+    links to now and the frozen layers of those nodes.
 
     Layer k of a user is the sum, over the nodes n it links to, of layer k - 1 of n,
     divided by sqrt(its own number of links x n's number of links in the trained
-    graph); the user vector is the mean of the layers, layer 0 being the user's own
-    trained vector (zero for a user the graph has not seen). neighbours: one array of
-    node ids per request. own: each request's layer-0 vector, or None."""
+    graph); the user vector is the mean of layers first ... K, layer 0 being the user's
+    own trained vector (zero for a user the graph has not seen). neighbours: one array
+    of node ids per request. own: each request's layer-0 vector, or None. deg: from
+    graph_degrees, the same degrees training used."""
     K = len(L) - 1
     n_req = len(neighbours)
     rows = np.concatenate([np.full(len(nb), r) for r, nb in enumerate(neighbours)])
@@ -173,7 +197,20 @@ def request_vectors(L, deg, neighbours, own=None):
     layers = [np.zeros((n_req, L[0].shape[1])) if own is None else own]
     for k in range(1, K + 1):
         layers.append(M @ L[k - 1])
-    return np.mean(layers, axis=0)
+    return np.mean(layers[first:], axis=0)
+
+
+def check_fold_in(model, A_hat, edges, n_nodes, users):
+    """With the graph unchanged, request-time fold-in from each user's own neighbours in
+    the trained graph must rebuild the user's trained vector."""
+    A = symmetric_adjacency(*edges, n_nodes)
+    deg = graph_degrees(*edges, n_nodes)
+    L, final = layer_vectors(model, A_hat)
+    nb = [A.indices[A.indptr[u]:A.indptr[u + 1]].astype(np.int64) for u in users]
+    U = request_vectors(L, deg, nb, L[0][users], first=model.first)
+    err = np.abs(U - final[users]).max()
+    assert err < 1e-5, f"fold-in does not rebuild the trained vectors (max difference {err:.2e})"
+    return err
 
 
 def history_nodes(H, n_users, extra=None):
