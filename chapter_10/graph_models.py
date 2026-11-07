@@ -139,7 +139,9 @@ def fit_lightgcn(edges, n_nodes, n_users, video_nodes, layers=2, dim=32, epochs=
     the whole graph propagated at every step. edges: all undirected edges of the
     graph (rows, cols); the user-video ones are those with a user end. cl > 0 adds
     SimGCL's loss: two noisy views of the batch's users and videos, pulled together,
-    and leaves layer 0 out of every final vector, as the SimGCL paper does."""
+    and leaves layer 0 out of every final vector, as the SimGCL paper does. Every
+    `every` epochs it calls after(epoch, model, A_hat); if that returns True, training
+    stops there (early stopping)."""
     rows, cols = edges
     A_hat, _ = normalised_adjacency(rows, cols, n_nodes)
     uv = (rows < n_users) & np.isin(cols, video_nodes)
@@ -165,8 +167,8 @@ def fit_lightgcn(edges, n_nodes, n_users, video_nodes, layers=2, dim=32, epochs=
             opt.zero_grad()
             loss.backward()
             opt.step()
-        if every and epoch % every == 0 and after is not None:
-            after(epoch, model, A_hat)
+        if every and epoch % every == 0 and after is not None and after(epoch, model, A_hat):
+            break
     return model, A_hat
 
 

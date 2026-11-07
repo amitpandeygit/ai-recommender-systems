@@ -32,7 +32,7 @@ can grow where the user's own clicks say little.
 Differences against A are paired over the same requests, with standard errors and 95%
 intervals from 1,000 bootstrap draws of whole users.
 
-Needs Python 3.12 or later, PyTorch and pyroaring. Run from the repository root (about 25 minutes):
+Needs Python 3.12 or later, PyTorch and pyroaring. Run from the repository root (about 50 minutes):
     python chapter_10/graph_pipeline.py
 """
 import os
@@ -63,7 +63,7 @@ from slates import ad_setup, best_ads, check_rows  # noqa: E402
 from two_tower import guardrails  # noqa: E402
 
 EXTRA = 50                                     # graph candidates added per request
-EPOCHS = {"LightGCN": 240, "LightGCN + creators": 300, "LightGCN + follows": 300, "LightGCN + KG": 240}   # validation choices of sections 10.4 to 10.6
+EPOCHS = {"LightGCN": 240, "LightGCN + creators": 540, "LightGCN + follows": 580, "LightGCN + KG": 240}   # validation choices of sections 10.4 to 10.6
 
 
 def features(heavy_p, g, few):

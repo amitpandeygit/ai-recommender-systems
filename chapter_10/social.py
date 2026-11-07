@@ -31,9 +31,11 @@ if it is consenting and not private; and the clicks of every consenting user, pr
 or not, train the shared models pooled with everyone else's, as in every chapter.
 
 LightGCN uses the layers chosen in next_video.py; the epochs of the graph models are
-chosen on the validation week by NDCG@10 over all its requests, Chapter 5's rule.
+chosen on the validation week by NDCG@10 over all its requests, Chapter 5's rule: each
+graph is checked every 20 epochs, up to 600, and stops after 5 checks in a row without
+a new best; the best check is kept.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 60 minutes):
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 2 hours 15 minutes):
     python chapter_10/social.py
 """
 import os
@@ -55,7 +57,8 @@ import baselines as B  # noqa: E402
 from slate_data import split  # noqa: E402
 
 LAYERS = 3                       # next_video.py's validation choice for LightGCN
-EPOCHS, EVERY = 300, 20
+EPOCHS, EVERY = 600, 20          # at most 600 epochs, checked every 20 on the validation week
+PATIENCE = 5                     # stop after 5 checks in a row without a new best
 SEEDS = (0, 1, 2)
 FEW = 2                          # "few clicks": at most this many different videos clicked before the request
 
@@ -165,9 +168,13 @@ if __name__ == "__main__":
         deg = graph_degrees(*edges, n_nodes)
         nb = neighbours_now(W, Hv, links_v, soc)
         curve = []
-        fit_lightgcn(edges, n_nodes, n_u, vn, layers=LAYERS, epochs=EPOCHS, every=EVERY,
-                     after=lambda e, m, Ah, curve=curve, deg=deg, nb=nb: curve.append(
-                         (e, ndcg(Rv, top10(gcn_scores(m, Ah, deg, nb, Rv["user"], n_u, n_i), badv, tie=pop16)))))
+
+        def check(e, m, Ah, curve=curve, deg=deg, nb=nb):
+            """Record validation NDCG@10; True (stop) after PATIENCE checks without a new best."""
+            curve.append((e, ndcg(Rv, top10(gcn_scores(m, Ah, deg, nb, Rv["user"], n_u, n_i), badv, tie=pop16))))
+            best_at = max(range(len(curve)), key=lambda k: round(curve[k][1], 9))
+            return len(curve) - 1 - best_at >= PATIENCE
+        fit_lightgcn(edges, n_nodes, n_u, vn, layers=LAYERS, epochs=EPOCHS, every=EVERY, after=check)
         best = max(curve, key=lambda x: round(x[1], 9))
         ep[name] = best[0]
         print(f"  {name:<20}" + " ".join(f"{e}:{x:.4f}" for e, x in curve) + f"   chosen: {best[0]}"
