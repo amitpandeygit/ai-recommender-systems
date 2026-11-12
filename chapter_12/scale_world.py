@@ -7,20 +7,25 @@ days on average instead of 10), so that histories are long enough to study histo
 length. The 5,000 items' settings and the 30 days are Chapter 2's. Chapter 3's rules give every item a category and a
 language. The old system that chose what users saw is Chapter 2's, unchanged.
 
-Only what the scaling runs need is kept: every video click, with its user, its moment
-and its visit, in true order. The identity gaps, upload delays and duplicates of
-Chapter 2's logs are left out. Chapters 9 to 11 test them; here they would only add
+Only what the scaling runs need is kept: every video click of a consenting user, with
+its user, its moment, the moment of the request that showed it and its visit, in true
+order. As in Chapter 9's click log, a user's clicks are kept only if the user consents
+to personalisation now (and so has consented all month): the clicks of a user who
+turned it off are not used for training or testing. The identity gaps, upload delays
+and duplicates of Chapter 2's logs are left out. Chapters 9 to 11 test them; here they would only add
 noise to a study of model size, data and history length. The behaviour draws use their
 own generator (seed cfg.seed + 1200) and are made in blocks of requests, to keep memory
 small. The result is saved in scale_world.npz next to this file, so it is built once.
 
-  build()   - the world: clicks (user, item, time, session, sorted by user and time),
+  build()   - the world: clicks of consenting users (user, item, time, request time,
+              session, sorted by user and time),
               items (creator, category, language, is_product) and the number of users
   load()    - the saved world, built first if needed
   sequences(W) - the data of the scaling runs: videos renumbered 0 to V - 1; 10% of
               users, drawn at random (seed 0), held out; the other users' clicks before
               day 23 for training; the held-out users' whole sequences, to score their
-              clicks before day 23 (validation) and in days 23 to 30 (test)
+              clicks before day 23 (validation) and in days 23 to 30 (test). Each part
+              is (videos, click times, request times), one array of each per user
 
 Needs Python 3.12 or later. Run from the repository root (about 4 minutes):
     python chapter_12/scale_world.py
@@ -73,12 +78,13 @@ def build(cfg=Config(num_users=USERS, sessions_per_user=VISITS), P=Planted()):
         p_attract = sigmoid(5 * match - 3.5 + items["clickbait"][i])
         clicked = (draw.random(len(i)) < p_look) & (draw.random(len(i)) < p_attract) & ~items["is_product"][i]
         t = t0 + (p - 1) * 2.5 + np.where(glimpse, draw.uniform(0.2, 0.9, len(i)), draw.uniform(1, 6, len(i)))
-        c = np.flatnonzero(clicked)
-        parts.append((u[c], i[c], t[c], sess[c]))
-    user, item, t, sess = (np.concatenate([q[j] for q in parts]) for j in range(4))
+        c = np.flatnonzero(clicked & users["current_consent"][u])          # consenting users only
+        parts.append((u[c], i[c], t[c], t0[c], sess[c]))
+    user, item, t, t_req, sess = (np.concatenate([q[j] for q in parts]) for j in range(5))
     o = np.lexsort((t, user))
     add_attributes(cfg, users, items)
-    return {"user": user[o], "item": item[o], "time": t[o], "session": sess[o], "n_users": cfg.num_users,
+    return {"user": user[o], "item": item[o], "time": t[o], "request_time": t_req[o], "session": sess[o],
+            "n_users": cfg.num_users, "consenting": int(users["current_consent"].sum()),
             "creator": items["creator"], "category": items["category"], "language": items["language"],
             "is_product": items["is_product"]}
 
@@ -87,7 +93,7 @@ def load():
     if not FILE.exists():
         np.savez_compressed(FILE, **build())
     z = np.load(FILE)
-    return {k: (int(z[k]) if k == "n_users" else z[k]) for k in z.files}
+    return {k: (int(z[k]) if k in ("n_users", "consenting") else z[k]) for k in z.files}
 
 
 def sequences(W, held_share=0.10):
@@ -97,16 +103,18 @@ def sequences(W, held_share=0.10):
     item = renum[W["item"]]
     starts = np.searchsorted(W["user"], np.arange(W["n_users"] + 1))
     held = np.random.default_rng(0).random(W["n_users"]) < held_share
-    train, other = ([], []), ([], [])
+    train, other = ([], [], []), ([], [], [])
     for u in range(W["n_users"]):
-        s, t = item[starts[u]:starts[u + 1]], W["time"][starts[u]:starts[u + 1]]
+        s, t, r = (a[starts[u]:starts[u + 1]] for a in (item, W["time"], W["request_time"]))
+        if not len(s):
+            continue                                  # no clicks: a user who does not consent, or never clicked
         if held[u]:
-            other[0].append(s)
-            other[1].append(t)
+            for part, a in zip(other, (s, t, r)):
+                part.append(a)
         else:
-            train[0].append(s[t < 23 * DAY])
-            train[1].append(t[t < 23 * DAY])
-    return {"train": train, "held": other, "n_videos": len(video), "held_users": int(held.sum())}
+            for part, a in zip(train, (s, t, r)):
+                part.append(a[t < 23 * DAY])
+    return {"train": train, "held": other, "n_videos": len(video), "held_users": len(other[0])}
 
 
 if __name__ == "__main__":
@@ -114,10 +122,12 @@ if __name__ == "__main__":
     if FILE.exists():
         FILE.unlink()
     W = load()
-    per_user = np.bincount(W["user"], minlength=W["n_users"])
+    per_user = np.bincount(W["user"], minlength=W["n_users"])[np.unique(W["user"])]
     q = np.percentile(per_user, [10, 50, 90, 99])
-    print(f"Scale world: {W['n_users']:,} users, {len(W['is_product']):,} items "
-          f"({(~W['is_product']).sum():,} videos), {len(W['item']):,} video clicks in 30 days  [{time.time() - t0:.0f} s]")
+    print(f"Scale world: {W['n_users']:,} users, {W['consenting']:,} of them consenting to personalisation; "
+          f"{len(W['is_product']):,} items ({(~W['is_product']).sum():,} videos); {len(W['item']):,} video clicks of "
+          f"consenting users in 30 days  [{time.time() - t0:.0f} s]")
     print(f"  clicks before day 23: {(W['time'] < 23 * DAY).sum():,}; in days 23 to 30: {(W['time'] >= 23 * DAY).sum():,}")
-    print(f"  clicks per user: mean {per_user.mean():.1f}; 10th, 50th, 90th and 99th percentiles "
+    print(f"  clicks per consenting user with a click: {len(per_user):,} users; mean {per_user.mean():.1f}; "
+          f"10th, 50th, 90th and 99th percentiles "
           f"{q[0]:.0f}, {q[1]:.0f}, {q[2]:.0f}, {q[3]:.0f}")

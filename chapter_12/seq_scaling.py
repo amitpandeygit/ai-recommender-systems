@@ -13,7 +13,8 @@ clicks' popularity, and the cross-entropy of a uniform guess over all videos.
              epoch of every run is a point (compute, validation loss); the lowest loss
              at or below each compute forms the frontier, fitted with a power law in
              compute (scaling_laws.py), and the best test loss of each size is fitted
-             with a power law in parameters.
+             with a power law in non-embedding weights (as Kaplan and colleagues
+             counted them: the video and position vectors are left out).
   data     - one size (d 64, 2 layers) on 1/32, 1/16, 1/8, 1/4, 1/2 and all of the
              training users (nested; seed 1), each trained until its validation loss
              has not improved for 2 epochs (at most 40), so that every run reaches its
@@ -23,7 +24,7 @@ clicks' popularity, and the cross-entropy of a uniform guess over all videos.
 
 Compute is train_flops (Listing 12.3) times the training clicks seen.
 
-Needs Python 3.12 or later, PyTorch and SciPy. Run from the repository root (about 3
+Needs Python 3.12 or later, PyTorch and SciPy. Run from the repository root (about 2.5
 hours on 2 CPUs; add size, data or length to run one part):
     python chapter_12/seq_scaling.py
 """
@@ -52,14 +53,14 @@ MID = (64, 2)
 
 
 def clicks(data):
-    return int(sum(s.sum() for s in data[2]))
+    return int(sum(s.sum() for s in data[3]))
 
 
 def references(D, test):
     """Test loss of the training clicks' popularity (add-one smoothed), and of a uniform guess."""
     counts = np.bincount(np.concatenate(D["train"][0]), minlength=D["n_videos"]) + 1.0
     logp = np.log(counts / counts.sum())
-    y = np.concatenate([x[1:][ok] for x, ok in zip(test[0], test[2])])
+    y = np.concatenate([x[1:][ok] for x, ok in zip(test[0], test[3])])
     return -logp[y].mean(), np.log(D["n_videos"])
 
 
@@ -80,7 +81,8 @@ def run(D, kind, d, layers, k, train, valid, test, epochs, t0, label="", patienc
     print(f"  {kind:<7}{label:<14}{m.non_embedding_params():>12,}{params:>11,}{train_flops(m, k):>13,}"
           f"{per:>11.3g}  " + " ".join(f"{v:.4f}" for v in curve) + f"{best:>6}{test_loss:>9.4f}"
           f"  [{time.time() - t0:.0f} s]", flush=True)
-    return {"curve": curve, "test": test_loss, "per_epoch": per, "params": params}
+    return {"curve": curve, "test": test_loss, "per_epoch": per, "params": params,
+            "non_embedding": m.non_embedding_params()}
 
 
 if __name__ == "__main__":
@@ -108,7 +110,7 @@ if __name__ == "__main__":
         for kind in KINDS:
             for d, L in SIZES:
                 res[kind, d, L] = run(D, kind, d, L, k, train, valid, test, 6, t0, f"d {d}, {L} layer" + "s" * (L > 1))
-        print("\nScaling laws over model size (validation loss for the frontier, test loss for parameters):")
+        print("\nScaling laws over model size (validation loss for the frontier, test loss for non-embedding weights):")
         for kind in KINDS:
             pts = [(r["per_epoch"] * (e + 1), v) for (kd, _, _), r in res.items() if kd == kind
                    for e, v in enumerate(r["curve"])]
@@ -117,7 +119,8 @@ if __name__ == "__main__":
                   + ", ".join(f"{c:.3g}:{v:.4f}" for c, v in fr))
             law_line(f"{kind}, loss against compute", [c for c, _ in fr], [v for _, v in fr], "C")
             rs = [r for (kd, _, _), r in res.items() if kd == kind]
-            law_line(f"{kind}, test loss against parameters", [r["params"] for r in rs], [r["test"] for r in rs], "N")
+            law_line(f"{kind}, test loss against non-embedding weights", [r["non_embedding"] for r in rs],
+                     [r["test"] for r in rs], "N")
 
     if "data" in parts:
         order = np.random.default_rng(1).permutation(len(D["train"][0]))
@@ -128,7 +131,7 @@ if __name__ == "__main__":
         for kind in KINDS:
             for f in FRACTIONS:
                 keep = order[:int(round(f * len(order)))]
-                part = windows([D["train"][0][i] for i in keep], [D["train"][1][i] for i in keep], k)
+                part = windows(*([a[i] for i in keep] for a in D["train"]), k)
                 res[kind, f] = run(D, kind, *MID, k, part, valid, test, 40, t0, f"{f:.4g} of users", patience=2)
                 res[kind, f]["clicks"] = clicks(part)
         print("\nScaling laws over training clicks (test loss):")

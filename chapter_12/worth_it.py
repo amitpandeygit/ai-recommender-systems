@@ -2,8 +2,8 @@
 
 Part 1, what serving costs. For each size of section 12.5, the forward FLOPs of one
 request (a history of 64 clicks, then a score for every video), counted by PyTorch's
-FlopCounterMode, and the time per request measured on this machine's 2 CPUs, in
-batches of 64 requests (the median of 5 timings).
+FlopCounterMode, and the time of a batch of 64 requests on this machine's 2 CPUs (the
+median of 5 timings), also divided by 64 (large_models.serving_cost).
 
 Part 2, the honest test in Chapter 9's planted world, where a visit's intent and
 slow drift make the order of clicks matter (Chapter 2's world has neither, and
@@ -22,6 +22,9 @@ model:
   + HSTU, large          - d 128, 4 layers
 
 Each HSTU reads the last 50 clicks with their times, and the moment of the request.
+Chapter 9's click log keeps no request times, so in training each click is predicted at
+the moment of the click itself, seconds after its request; at serving, at the
+moment of the request.
 Except for the "ids" arm, a video's vector adds learned vectors for its creator,
 category and language to the vector of its id, as Chapter 9's models do, so that the
 HSTU arms read the same inputs as Chapter 9's model. Each HSTU's epochs (up to 30,
@@ -51,7 +54,7 @@ from torch.utils.flop_counter import FlopCounterMode
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "chapter_09"))
-from large_models import SeqLM, fit, windows  # noqa: E402
+from large_models import SeqLM, fit, serving_cost, windows  # noqa: E402
 from seq_scaling import SIZES  # noqa: E402
 from seq_data import (CHOICE, DAY, WORLDS, available_clicks, eligible_kept, environment, exclude_mask,  # noqa: E402
                       forbidden_shown, histories, load, ndcg, outcomes, paired, ranked_pools, requests,
@@ -72,39 +75,6 @@ HSTU_ARMS = {"+ HSTU, small, ids": (32, 1, False), "+ HSTU, small": (32, 1, True
 
 
 # ---------------------------------------------------------------- serving cost
-def request_batch(n_videos, n=64, k=64, seed=0):
-    """A made-up batch of n requests, each with k earlier clicks and their times."""
-    g = torch.Generator().manual_seed(seed)
-    x = torch.randint(0, n_videos, (n, k), generator=g)
-    t = torch.sort(torch.rand(n, k, generator=g) * 30 * DAY, dim=1).values
-    tn = torch.cat([t[:, 1:], t[:, -1:] + 60.0], 1)
-    return x, t, tn
-
-
-@torch.no_grad()
-def serve(model, x, t, tn):
-    """The scores of every video for each request: the last position's output."""
-    return model.logits(model.encode(x, t, tn)[:, -1])
-
-
-def serving_cost(model, k=64, n=64):
-    """Forward FLOPs and milliseconds per request (median of 5 timings of a batch of n).
-    The FLOPs are counted in training mode, where dropout adds none: in evaluation mode
-    PyTorch runs SASRec's attention as one fused operation that FlopCounterMode does
-    not count. The timings are made in evaluation mode, as a server would run."""
-    x, t, tn = request_batch(model.n_videos, n, k)
-    model.train()
-    with FlopCounterMode(display=False) as fc:
-        serve(model, x, t, tn)
-    model.eval()
-    times = []
-    for _ in range(5):
-        t0 = time.perf_counter()
-        serve(model, x, t, tn)
-        times.append(time.perf_counter() - t0)
-    return fc.get_total_flops() / n, 1_000 * float(np.median(times)) / n
-
-
 # ---------------------------------------------------------------- sequences with times, under Chapter 9's contract
 def timed_sequences(W, cutoff):
     """Each user's clicked videos the server could use at the cutoff, with their times."""
@@ -146,7 +116,7 @@ class HSTUSource:
         self.model = SeqLM(len(self.video), "HSTU", d, layers, max_len=K, seed=seed, parts=parts)
 
     def data(self, seqs, times, lo=-np.inf, hi=np.inf):
-        return windows([self.renum[s] for s in seqs], times, K, lo, hi)
+        return windows([self.renum[s] for s in seqs], times, None, K, lo, hi)
 
     @torch.no_grad()
     def log_probs(self, H, T, t_req):
@@ -197,13 +167,15 @@ if __name__ == "__main__":
     t0 = time.time()
     print(environment())
     print("Part 1: serving cost per request (64 earlier clicks; a score for every one of 3,480 videos)")
-    print(f"  {'':<24}{'params':>11}{'FLOPs/request':>15}{'ms/request':>12}")
+    print(f"  {'':<24}{'params':>11}{'FLOPs/request':>15}{'ms/batch of 64':>16}{'ms/request':>12}")
     for kind in ("HSTU", "SASRec"):
         for d, L in SIZES:
             m = SeqLM(3_480, kind, d, L, max_len=64)
-            f, ms = serving_cost(m)
+            f, ms, batch_ms = serving_cost(m)
             print(f"  {kind + ', d ' + str(d) + ', ' + str(L) + ' layer' + 's' * (L > 1):<24}"
-                  f"{sum(p.numel() for p in m.parameters()):>11,}{f:>15,.0f}{ms:>12.3f}", flush=True)
+                  f"{sum(p.numel() for p in m.parameters()):>11,}{f:>15,.0f}{batch_ms:>16.2f}{ms:>12.3f}", flush=True)
+    print("  (ms/request: the time of a batch of 64 divided by 64, a share of the machine's time, not the latency a "
+          "request sees, which includes its whole batch and any queue)")
 
     name = WORLDS[1]
     W = load(name)
@@ -239,7 +211,7 @@ if __name__ == "__main__":
         times.append(time.perf_counter() - t1)
     cost["+ Chapter 9's model"] = (fc.get_total_flops() / 64, 1_000 * float(np.median(times)) / 64)
     for label in HSTU_ARMS:
-        cost[label] = serving_cost(models23[label].model, k=K)
+        cost[label] = serving_cost(models23[label].model, k=K)[:2]
 
     # blends on the validation week
     sp = split(W, "validation")
@@ -314,4 +286,4 @@ if __name__ == "__main__":
             *paired(res[a_], res[b_], R["user"])))
     print("  (online: expected satisfied plays per row; later: requests after the first of their visit; against A: "
           "paired difference, standard error and 95% interval from 1,000 bootstrap draws of whole users; "
-          f"FLOPs and ms: the sequence model's forward pass per request on this machine)  [{time.time() - t0:.0f} s]")
+          f"FLOPs and ms: the sequence model's forward pass per request on this machine, ms as a share of a batch of 64)  [{time.time() - t0:.0f} s]")

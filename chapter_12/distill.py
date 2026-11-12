@@ -12,7 +12,7 @@ world (scale_world.py):
              (the first eighth of one random order, seed 1)
 
 The student is trained three ways, each until its validation loss has not improved for
-2 epochs (at most 40), with the best epoch kept:
+2 epochs (at most 300), with the best epoch kept:
   alone            - on its own clicks, with the usual cross-entropy
   distilled        - on its own clicks, with the teacher's softened prediction over every
                      video as a second target (large_models.distill_loss: weight 0.5,
@@ -22,8 +22,11 @@ The student is trained three ways, each until its validation loss has not improv
 
 The measure is the test loss of section 12.5 (held-out users' clicks in days 23 to 30),
 and the share of the gap between the student alone and the teacher that each closes.
+Each model's serving cost is its forward FLOPs for one request with 64 earlier clicks
+(large_models.serving_cost); training cost per click adds, for the distilled student,
+the teacher's forward pass.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 25 minutes):
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 30 minutes):
     python chapter_12/distill.py
 """
 import os
@@ -39,7 +42,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "chapter_09"))
 from scale_world import DAY, load, sequences  # noqa: E402
-from large_models import SeqLM, fit, loss, train_flops, windows  # noqa: E402
+from large_models import SeqLM, fit, loss, serving_cost, train_flops, windows  # noqa: E402
 from seq_data import environment  # noqa: E402
 
 K = 64
@@ -47,9 +50,10 @@ TEACHER, STUDENT = (128, 4), (32, 1)
 SHARE = 1 / 8
 
 
-def line(label, m, curve, test, t0):
-    print(f"  {label:<34}{sum(p.numel() for p in m.parameters()):>11,}{train_flops(m, K) / 3:>14,.0f}  "
-          + " ".join(f"{v:.4f}" for v in curve) + f"{test:>9.4f}  [{time.time() - t0:.0f} s]", flush=True)
+def line(label, m, train_cost, curve, test, t0):
+    print(f"  {label:<26}{sum(p.numel() for p in m.parameters()):>11,}{serving_cost(m, K)[0]:>15,.0f}"
+          f"{train_cost:>14,.0f}{len(curve):>8}{int(np.argmin(curve)) + 1:>6}{min(curve):>12.4f}{test:>9.4f}"
+          f"  [{time.time() - t0:.0f} s]", flush=True)
 
 
 if __name__ == "__main__":
@@ -61,25 +65,29 @@ if __name__ == "__main__":
     test = windows(*D["held"], K, lo=23 * DAY)
     order = np.random.default_rng(1).permutation(len(D["train"][0]))
     keep = order[:int(round(SHARE * len(order)))]
-    own = windows([D["train"][0][i] for i in keep], [D["train"][1][i] for i in keep], K)
-    n_own = int(sum(s.sum() for s in own[2]))
-    n_all = int(sum(s.sum() for s in train[2]))
+    own = windows(*([a[i] for i in keep] for a in D["train"]), K)
+    n_own = int(sum(s.sum() for s in own[3]))
+    n_all = int(sum(s.sum() for s in train[3]))
     print(f"Teacher data: {n_all:,} training clicks; the student's surface: {len(keep):,} users, {n_own:,} clicks  "
           f"[{time.time() - t0:.0f} s]")
-    print(f"  {'':<34}{'params':>11}{'FLOPs/click':>14}  validation loss after each epoch{'':>30}{'test':>9}")
+    print(f"  {'':<26}{'params':>11}{'FLOPs/request':>15}{'train/click':>14}{'epochs':>8}{'best':>6}"
+          f"{'validation':>12}{'test':>9}")
     teacher, curve = fit(SeqLM(D["n_videos"], "HSTU", *TEACHER, max_len=K), train, valid, 6)
     t_test = loss(teacher, test)
-    line(f"teacher, d {TEACHER[0]}, {TEACHER[1]} layers", teacher, curve, t_test, t0)
+    line(f"teacher, d {TEACHER[0]}, {TEACHER[1]} layers", teacher, train_flops(teacher, K), curve, t_test, t0)
     res = {}
     for label, data, teach in (("alone", own, None), ("distilled", own, teacher), ("with all clicks", train, None)):
-        m, curve = fit(SeqLM(D["n_videos"], "HSTU", *STUDENT, max_len=K), data, valid, 40, teacher=teach,
+        m, curve = fit(SeqLM(D["n_videos"], "HSTU", *STUDENT, max_len=K), data, valid, 300, teacher=teach,
                        patience=2)
         res[label] = loss(m, test)
-        line(f"student, {label}", m, curve, res[label], t0)
+        cost = train_flops(m, K) + (train_flops(teacher, K) / 3 if teach is not None else 0)
+        line(f"student, {label}", m, cost, curve, res[label], t0)
     gap = res["alone"] - t_test
     print(f"\nGap between the student alone and the teacher: {gap:.4f} nats. Closed by distillation: "
           f"{res['alone'] - res['distilled']:.4f} ({(res['alone'] - res['distilled']) / gap:.1%}); by 8 times the data "
           f"without a teacher: {res['alone'] - res['with all clicks']:.4f} "
           f"({(res['alone'] - res['with all clicks']) / gap:.1%})")
-    print("(FLOPs/click: one forward pass per predicted click, what serving costs; test: cross-entropy of the held-out "
-          f"users' clicks in days 23 to 30)  [{time.time() - t0:.0f} s]")
+    print("(FLOPs/request: one forward pass over a history of 64 clicks, scoring every video, what serving a request "
+          "costs (large_models.serving_cost); train/click: training FLOPs per predicted click (Listing 12.3), plus the "
+          "teacher's forward pass for the distilled student; epochs: run, best: the epoch kept, validation: its loss; "
+          f"test: cross-entropy of the held-out users' clicks in days 23 to 30)  [{time.time() - t0:.0f} s]")

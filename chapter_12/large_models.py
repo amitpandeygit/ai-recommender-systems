@@ -15,21 +15,26 @@ the output, as in Chapter 9, and a learned vector per position is added at the i
   SASRec   - a standard causal Transformer (Kang and McAuley, 2018), pre-norm, softmax
              attention and a feed-forward block 4 times as wide: 12 d^2 weights a layer.
 
-  windows(seqs, times, k, lo, hi) - sequences cut into windows of k + 1 clicks, so every
-                                  click is predicted from at most k earlier ones; only
-                                  targets whose time is in [lo, hi) are scored
+  windows(seqs, times, moments, k, lo, hi) - sequences cut into windows of k + 1
+                                  clicks, so every click is predicted from 1 to k earlier
+                                  ones, at the moment of its request; only targets whose
+                                  time is in [lo, hi) are scored
   train_flops(model, k)         - training compute per predicted click (Listing 12.3)
+  serving_cost(model, k, n)     - forward FLOPs per request, and the time of a batch of
+                                  n requests (section 12.7)
   fit(model, train, valid, ...) - Adam on full-softmax cross-entropy; the epoch with the
                                   lowest validation loss is kept
   loss(model, data)             - mean cross-entropy (nats) of the next click
   distill_loss(...)             - a student's loss with a teacher (section 12.6)
 """
 import math
+import time
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.utils.flop_counter import FlopCounterMode
 
 torch.set_num_threads(2)
 BUCKETS = 24                                   # time gaps: bucket = floor(log2(1 + seconds)), at most 24
@@ -109,8 +114,9 @@ class SeqLM(nn.Module):
 
     def encode(self, x, t, t_next):
         """x: videos (batch x n, right-padded); t: their times; t_next: at each position,
-        the moment of the click to be predicted (the next click in training; the request
-        at serving). Times in seconds. One output per position."""
+        the moment the next click is predicted at: the time of the request that led to
+        it, which a server knows when the request arrives. Times in seconds. One output
+        per position."""
         n = x.shape[1]
         real = x != self.pad
         mask = torch.tril(torch.ones(n, n, dtype=torch.bool))[None] & real[:, None, :] & real[:, :, None]
@@ -135,41 +141,86 @@ def train_flops(model, k):
     return 6 * weights + 3 * attention
 
 
-def windows(seqs, times, k, lo=-math.inf, hi=math.inf):
+def request_batch(n_videos, n=64, k=64, seed=0):
+    """A made-up batch of n requests, each with k earlier clicks and their times."""
+    g = torch.Generator().manual_seed(seed)
+    x = torch.randint(0, n_videos, (n, k), generator=g)
+    t = torch.sort(torch.rand(n, k, generator=g) * 30 * 86_400, dim=1).values
+    tn = torch.cat([t[:, 1:], t[:, -1:] + 60.0], 1)
+    return x, t, tn
+
+
+@torch.no_grad()
+def serve(model, x, t, tn):
+    """The scores of every video for each request: the last position's output."""
+    return model.logits(model.encode(x, t, tn)[:, -1])
+
+
+def serving_cost(model, k=64, n=64):
+    """What serving one request costs: the forward FLOPs per request, and the time of a
+    batch of n requests (the median of 5 timings) with that time divided by n. The time
+    per request is a share of a batch's time, not the latency a request sees: each
+    request waits for its whole batch, and for the queue before it. The FLOPs are
+    counted in training mode, where dropout adds none: in evaluation mode PyTorch runs
+    SASRec's attention as one fused operation that FlopCounterMode does not count. The
+    timings are made in evaluation mode, as a server would run."""
+    x, t, tn = request_batch(model.n_videos, n, k)
+    model.train()
+    with FlopCounterMode(display=False) as fc:
+        serve(model, x, t, tn)
+    model.eval()
+    times = []
+    for _ in range(5):
+        t0 = time.perf_counter()
+        serve(model, x, t, tn)
+        times.append(time.perf_counter() - t0)
+    batch_ms = 1_000 * float(np.median(times))
+    return fc.get_total_flops() / n, batch_ms / n, batch_ms
+
+
+def windows(seqs, times, moments, k, lo=-math.inf, hi=math.inf):
     """Every sequence cut into consecutive windows of k + 1 clicks: the first k are inputs
-    and each of the last k is predicted from the clicks before it in the window. A target
-    is scored only if its time is in [lo, hi). Returns (videos, times, scored) per window,
-    keeping only windows with a scored target."""
-    xs, ts, sc = [], [], []
-    for s, t in zip(seqs, times):
+    and each of the last k is predicted from the clicks before it in the window. moments
+    gives, for each click, the moment it is predicted at: the time of the request that
+    led to it, which a server knows when the request arrives (None: the click's own
+    time). A target is scored only if its click time is in [lo, hi). Returns (videos,
+    times, moments, scored) per window, keeping only windows with a scored target."""
+    xs, ts, ms, sc = [], [], [], []
+    moments = times if moments is None else moments
+    for s, t, m in zip(seqs, times, moments):
         for a in range(0, max(len(s) - 1, 1), k):
-            x, tt = s[a:a + k + 1], t[a:a + k + 1]
+            x, tt, mm = s[a:a + k + 1], t[a:a + k + 1], m[a:a + k + 1]
             ok = (tt[1:] >= lo) & (tt[1:] < hi)
             if len(x) >= 2 and ok.any():
                 xs.append(x)
                 ts.append(tt)
+                ms.append(mm)
                 sc.append(ok)
-    return xs, ts, sc
+    return xs, ts, ms, sc
 
 
-def tensors(xs, ts, sc, pad):
+def tensors(xs, ts, ms, sc, pad):
     n = max(len(x) for x in xs)
     X = np.full((len(xs), n), pad)
     T = np.zeros((len(xs), n))
+    M = np.zeros((len(xs), n))
     Y = np.full((len(xs), n - 1), pad)
-    for r, (x, t, ok) in enumerate(zip(xs, ts, sc)):
+    for r, (x, t, m, ok) in enumerate(zip(xs, ts, ms, sc)):
         X[r, :len(x)] = x
         T[r, :len(t)] = t
         T[r, len(t):] = t[-1]
+        M[r, :len(m)] = m
+        M[r, len(m):] = m[-1]
         Y[r, :len(x) - 1] = np.where(ok, x[1:], pad)          # targets not scored are padding
     T = torch.as_tensor(T, dtype=torch.float32)
-    return torch.as_tensor(X[:, :-1]), T[:, :-1], T[:, 1:], torch.as_tensor(Y)
+    M = torch.as_tensor(M, dtype=torch.float32)
+    return torch.as_tensor(X[:, :-1]), T[:, :-1], M[:, 1:], torch.as_tensor(Y)
 
 
 def batches(data, pad, batch, gen=None):
-    """(inputs, input times, target times, targets) in batches of windows of similar
-    length; shuffled when a random generator is given."""
-    xs, ts, sc = data
+    """(inputs, input times, the moments the targets are predicted at, targets) in
+    batches of windows of similar length; shuffled when a random generator is given."""
+    xs, ts, ms, sc = data
     length = torch.as_tensor([len(x) for x in xs], dtype=torch.float32)
     order = torch.argsort(length + (torch.rand(len(xs), generator=gen) if gen is not None else 0))
     groups = list(torch.split(order, batch))
@@ -177,7 +228,7 @@ def batches(data, pad, batch, gen=None):
         groups = [groups[g] for g in torch.randperm(len(groups), generator=gen).tolist()]
     for g in groups:
         g = g.tolist()
-        yield tensors([xs[i] for i in g], [ts[i] for i in g], [sc[i] for i in g], pad)
+        yield tensors([xs[i] for i in g], [ts[i] for i in g], [ms[i] for i in g], [sc[i] for i in g], pad)
 
 
 def loss(model, data, batch=256):
