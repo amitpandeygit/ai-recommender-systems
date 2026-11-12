@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .venv/
 .DS_Store
+chapter_11/text_embeddings.npz
+.venv-embed/
