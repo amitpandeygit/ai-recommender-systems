@@ -33,6 +33,7 @@ sys.path.insert(0, str(HERE.parent / "chapter_03"))
 from graph_data import load  # noqa: E402,F401
 from tesselo_shop import CATEGORIES, GENERIC_WORDS, LANGUAGES, VIDEO_CATEGORIES, WORDS_PER_CATEGORY  # noqa: E402
 from title_words import WORDS, render  # noqa: E402
+from embed_texts import REVISIONS  # noqa: E402
 
 TEXTS_FILE = HERE / "texts_to_embed.tsv"
 EMBEDDINGS_FILE = Path(os.environ.get("CH11_EMBEDDINGS", HERE / "text_embeddings.npz"))
@@ -145,6 +146,10 @@ def text_embeddings(W, model):
     z = np.load(EMBEDDINGS_FILE)
     if str(z["digest"]) != texts_digest(texts):
         raise SystemExit("text_embeddings.npz was computed from different texts: run embed_texts.py again")
+    key = model + " revision"
+    if key not in z.files or str(z[key]) != REVISIONS[model]:
+        raise SystemExit(f"text_embeddings.npz was not made with {model} at revision {REVISIONS[model][:12]}: "
+                         "run embed_texts.py again")
     E = z[model].astype(np.float32)
     E /= np.maximum(np.linalg.norm(E, axis=1, keepdims=True), 1e-12)
     return E, idx

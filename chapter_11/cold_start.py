@@ -24,7 +24,8 @@ user's app language), as section 10.5 found best. The methods:
   aligned with clicks   - Listing 11.6: a small network trained on the fused content
                           vectors of pairs of videos clicked one after the other by the
                           same user, with a symmetric in-batch softmax loss (as QARM and
-                          CAMIE align a pretrained model with co-engagement), then used
+                          CAMIE align a pretrained model with co-engagement), an item
+                          repeated in a batch not counting as its own negative, then used
                           like raw content
 
 New products: section 10.5's launch test. 150 products, drawn at random, are treated as
@@ -41,7 +42,7 @@ choices. The models are then refitted on day 23 from seeds 0, 1 and 2 (the regre
 and raw content have no seed).
 
 Needs Python 3.12 or later, PyTorch and text_embeddings.npz. Run from the repository
-root (about 35 minutes):
+root (about 40 minutes):
     python chapter_11/cold_start.py
 """
 import os
@@ -73,7 +74,7 @@ PENALTIES = (1.0, 10.0, 100.0, 1_000.0)
 ALIGN_EPOCHS, ALIGN_EVERY = 60, 5
 # Section 11.7's validation choices for new videos, used by content_pipeline.py: the settings
 # of both methods, and the method with the higher validation NDCG@10 over new videos
-CHOSEN = {"method": "aligned with clicks", "penalty": 10.0, "epochs": 5}
+CHOSEN = {"method": "mapped to clicks", "penalty": 10.0, "epochs": 5}
 
 
 # ---------------------------------------------------------------- Listing 11.5: map content into the click space
@@ -105,7 +106,9 @@ class Aligner(torch.nn.Module):
 
 def fit_aligner(X, pairs, epochs, batch=1_024, tau=0.1, lr=1e-3, seed=0, every=0, after=None):
     """Pairs (i, j) of items engaged one after the other by the same user should end up
-    closer than the other items of the batch: a softmax over the batch in both directions."""
+    closer than the other items of the batch: a softmax over the batch in both directions.
+    An item that appears in several pairs of a batch is not a negative of itself: those
+    entries are masked out."""
     model = Aligner(X.shape[1], seed=seed)
     opt = torch.optim.Adam(model.parameters(), lr=lr)
     Xt = torch.as_tensor(X)
@@ -117,7 +120,11 @@ def fit_aligner(X, pairs, epochs, batch=1_024, tau=0.1, lr=1e-3, seed=0, every=0
             a, b = model(Xt[p[:, 0]]), model(Xt[p[:, 1]])
             logits = a @ b.T / tau
             target = torch.arange(len(p))
-            loss = (F.cross_entropy(logits, target) + F.cross_entropy(logits.T, target)) / 2
+            other = ~np.eye(len(p), dtype=bool)
+            again_b = torch.as_tensor((p[:, 1][None, :] == p[:, 1][:, None]) & other)   # the same item again
+            again_a = torch.as_tensor((p[:, 0][None, :] == p[:, 0][:, None]) & other)
+            loss = (F.cross_entropy(logits.masked_fill(again_b, -torch.inf), target)
+                    + F.cross_entropy(logits.T.masked_fill(again_a, -torch.inf), target)) / 2
             opt.zero_grad()
             loss.backward()
             opt.step()

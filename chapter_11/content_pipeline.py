@@ -12,7 +12,8 @@ did not allow. The arms differ only in how the slot-4 video is chosen:
                               (section 10.8's arm)
   + content "New for you"    - section 11.7's chosen content model, the user's language first
   + both "New for you"       - the mean of the two models' ranks among the new videos the
-                              request may show, the user's language first
+                              request may show (tied scores share a rank), the user's
+                              language first
 
 Each model is fitted on what had arrived by day 23, with the settings chosen on the
 validation week in sections 10.5 and 11.7, from seed 0. Differences against A are paired
@@ -20,7 +21,7 @@ over the same requests, with standard errors and 95% intervals from 1,000 bootst
 draws of whole users.
 
 Needs Python 3.12 or later, PyTorch, pyroaring and text_embeddings.npz. Run from the
-repository root (about 5 minutes):
+repository root (about 8 minutes):
     python chapter_11/content_pipeline.py
 """
 import os
@@ -31,6 +32,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from scipy.stats import rankdata
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -53,12 +55,13 @@ from two_tower import guardrails  # noqa: E402
 
 def ranks(s, bad):
     """Each score's rank among the request's allowed new videos, from 0 (lowest) to 1
-    (highest); a video the request may not show gets -1."""
-    s = np.where(bad, -np.inf, s)
-    r = np.argsort(np.argsort(s, axis=1, kind="stable"), axis=1, kind="stable").astype(np.float32)
-    n_ok = (~bad).sum(axis=1, keepdims=True)
-    r = (r - bad.sum(axis=1, keepdims=True)) / np.maximum(n_ok - 1, 1)
-    return np.where(bad, -1.0, r)
+    (highest), tied scores sharing the mean of their ranks, so a source whose scores are
+    all equal gives every allowed video 0.5 and does not change the choice; a video the
+    request may not show gets -1."""
+    r = rankdata(np.where(bad, -np.inf, s), axis=1, method="average") - 1.0
+    n_bad = bad.sum(axis=1, keepdims=True)
+    r = (r - n_bad) / np.maximum((~bad).sum(axis=1, keepdims=True) - 1, 1)
+    return np.where(bad, -1.0, r).astype(np.float32)
 
 
 if __name__ == "__main__":

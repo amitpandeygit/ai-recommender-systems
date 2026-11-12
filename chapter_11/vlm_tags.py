@@ -13,7 +13,9 @@ tested on hand-written answers, well formed and not.
 The test is the "New for you" slot of section 10.5: for each test request, the new video
 with the highest score among those it may show, the score being the user's language
 first, then the cosine between the video's title vector (Qwen3-Embedding) and the
-request's profile (Listing 11.2). The untitled videos' text is, in turn:
+request's profile (Listing 11.2). An untitled video can already be in histories, so
+each version builds its profiles from the text that version has for every video. The
+untitled videos' text is, in turn:
 
   creator's title   - the title the creator would have written (a reference)
   generic word only - what Tesselo actually has
@@ -112,7 +114,6 @@ if __name__ == "__main__":
     R, H, _, bad = phase(W, 23, S)
     bn = bad[:, cols]
     del bad
-    P = profiles(title, H)                                     # history videos are old, with their titles
     same = (users["language"][R["user"]][:, None] == lang[cols][None, :]).astype(np.float32)
     un = untitled[cols]
     print(f"\nNew videos at day 23: {len(cols):,}, of which {un.sum():,} have only a generic word as title; "
@@ -121,7 +122,7 @@ if __name__ == "__main__":
           f"{'only untitled':>15}{'against generic':>18}")
     res = {}
     for name, X in versions.items():
-        s = P @ X[cols].T + 1_000.0 * same
+        s = profiles(X, H) @ X[cols].T + 1_000.0 * same       # profiles from the text this version has
         choice = new_video_choice(s, bn, cols)
         only = new_video_choice(s[:, un], bn[:, un], cols[un])
         res[name] = (slot_plays(W, R, choice), slot_plays(W, R, only), np.isin(choice, cols[un]).mean())
