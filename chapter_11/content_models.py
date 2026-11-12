@@ -49,9 +49,11 @@ def scorer(P, F):
 
 
 def fuse(parts, weights):
-    """Listing 11.3. One content vector per item: the unit-length vector of each modality
-    times its weight, side by side, scaled so that the whole has length 1. A missing
-    modality is a zero block, so an item without sound is described by what it has."""
+    """Listing 11.3. One content vector per item: the vector of each modality times its
+    weight, side by side, scaled by the weights of the modalities the item has. When every
+    block it has is unit length, the whole has length 1. A missing modality is a zero
+    block, so an item without sound is described by what it has. (Section 11.4's filled
+    sound is a deliberate exception: a shorter block, counted as present.)"""
     blocks = [w * x for (x, _), w in zip(parts, weights)]
     has = np.stack([h for _, h in parts], axis=1)
     w2 = np.asarray(weights, dtype=np.float64) ** 2
