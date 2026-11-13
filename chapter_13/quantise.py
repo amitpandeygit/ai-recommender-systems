@@ -15,7 +15,7 @@ similar vectors share their first codes, so the ID is a coarse-to-fine address.
                                     the vectors of videos clicked one after the other
   train_rqvae(x, ...)             - trains an RQVAE, with the co-click loss if pairs are given;
                                     returns the model, its codes and its error
-  disambiguate(codes)             - Listing 13.3: one more code that numbers the items
+  disambiguate(codes, late)       - Listing 13.3: one more code that numbers the items
                                     sharing the same codes, so every ID is unique
   report(codes, K, ...)           - how evenly codes are used, collisions, and how well
                                     the codes group items with similar hidden taste
@@ -48,7 +48,7 @@ def kmeans(x, K, seed=0, iters=50):
     C = [x[rng.integers(len(x))]]
     d = ((x - C[0]) ** 2).sum(1)
     for _ in range(K - 1):                                       # k-means++: far points are likelier
-        C.append(x[rng.choice(len(x), p=d / d.sum())])
+        C.append(x[rng.choice(len(x), p=d / d.sum() if d.sum() > 0 else None)])   # all covered: any point
         d = np.minimum(d, ((x - C[-1]) ** 2).sum(1))
     C = np.array(C)
     for _ in range(iters):
@@ -59,9 +59,12 @@ def kmeans(x, K, seed=0, iters=50):
     return C
 
 
-def rq_kmeans(x, K, L, seed=0):
-    """RQ-KMeans: k-means at each level on the residuals left by the levels before."""
-    books, r = [], np.asarray(x, dtype=np.float64)
+def rq_kmeans(x, K, L, seed=0, fit=None):
+    """RQ-KMeans: k-means at each level on the residuals left by the levels before. The
+    codebooks are learned on the rows marked by fit (all rows if None); every row is then
+    coded with them."""
+    x = np.asarray(x, dtype=np.float64)
+    books, r = [], x if fit is None else x[fit]
     for level in range(L):
         C = kmeans(r, K, seed + level)
         books.append(C)
@@ -110,28 +113,37 @@ class RQVAE(nn.Module):
 def co_click_loss(z, pairs, gen, batch=1024, temp=0.1):
     """Listing 13.4. A contrastive loss on pairs of videos clicked one after the other:
     each video's latent should be closer to its partner's than to the other partners in
-    the batch (as in PLUM's co-occurrence regularisation)."""
+    the batch (as in PLUM's co-occurrence regularisation). A column whose video is the
+    right answer's video, drawn again, is not counted as a wrong answer."""
     i = torch.randint(len(pairs), (batch,), generator=gen)
-    a = F.normalize(z[pairs[i, 0]], dim=1)
-    b = F.normalize(z[pairs[i, 1]], dim=1)
+    va, vb = pairs[i, 0], pairs[i, 1]
+    a = F.normalize(z[va], dim=1)
+    b = F.normalize(z[vb], dim=1)
     s = a @ b.T / temp
+    other = ~torch.eye(batch, dtype=torch.bool)
     target = torch.arange(batch)
-    return 0.5 * (F.cross_entropy(s, target) + F.cross_entropy(s.T, target))
+    s_ab = s.masked_fill((vb[:, None] == vb[None, :]) & other, -float("inf"))      # the same partner again
+    s_ba = s.T.masked_fill((va[:, None] == va[None, :]) & other, -float("inf"))
+    return 0.5 * (F.cross_entropy(s_ab, target) + F.cross_entropy(s_ba, target))
 
 
 def train_rqvae(x, K, L, steps=3000, lr=1e-3, kmeans_init=True, reset_dead=True, seed=0, latent=32,
-                pairs=None, w_con=1.0):
-    """Trains an RQ-VAE on the rows of x (full batch). With kmeans_init the codebooks
-    start from k-means on the first latents, as TIGER does; with reset_dead, every 100
-    steps a code no item uses is moved onto a randomly chosen residual. With pairs (rows
-    of co-clicked videos), the co-click loss is added with weight w_con. Returns the model,
-    the codes and the relative reconstruction error."""
+                pairs=None, w_con=1.0, fit=None):
+    """Trains an RQ-VAE (full batch) on the rows of x marked by fit (all rows if None);
+    every row is then coded with the trained model. With kmeans_init the codebooks start
+    from k-means on the first latents, as TIGER does; with reset_dead, every 100 steps a
+    code no item uses is moved onto a randomly chosen residual. With pairs (rows of
+    co-clicked videos, all of them among the fitted rows), the co-click loss is added with
+    weight w_con. Returns the model, the codes of all rows and the relative reconstruction
+    error over all rows."""
     X = torch.as_tensor(np.asarray(x, dtype=np.float32))
+    rows = torch.arange(len(X)) if fit is None else torch.as_tensor(np.flatnonzero(fit))
     m = RQVAE(X.shape[1], K, L, latent=latent, seed=seed)
     gen = torch.Generator().manual_seed(seed)
     P = None if pairs is None else torch.as_tensor(pairs)
-    if P is not None:                                            # learn the co-clicks first, then quantise
-        opt = torch.optim.Adam(m.enc.parameters(), lr=lr)
+    if P is not None:
+        assert fit is None or np.asarray(fit)[np.asarray(pairs)].all(), "co-click pairs must be fitted rows"
+        opt = torch.optim.Adam(m.enc.parameters(), lr=lr)              # learn the co-clicks first, then quantise
         for step in range(steps // 3):
             loss = co_click_loss(m.enc(X), P, gen)
             opt.zero_grad()
@@ -139,7 +151,7 @@ def train_rqvae(x, K, L, steps=3000, lr=1e-3, kmeans_init=True, reset_dead=True,
             opt.step()
     if kmeans_init:
         with torch.no_grad():
-            r = m.enc(X)
+            r = m.enc(X[rows])
             for level in range(L):
                 C = torch.as_tensor(kmeans(r.numpy(), K, seed + level), dtype=torch.float32)
                 m.books[level] = C
@@ -147,8 +159,8 @@ def train_rqvae(x, K, L, steps=3000, lr=1e-3, kmeans_init=True, reset_dead=True,
     opt = torch.optim.Adam(m.parameters(), lr=lr)
     for step in range(1, steps + 1):
         z = m.enc(X)
-        codes, q, commit = m.quantise(z)
-        loss = F.mse_loss(m.dec(q), X) + commit
+        codes, q, commit = m.quantise(z[rows])
+        loss = F.mse_loss(m.dec(q), X[rows]) + commit
         if P is not None:
             loss = loss + w_con * co_click_loss(z, P, gen)
         opt.zero_grad()
@@ -156,12 +168,12 @@ def train_rqvae(x, K, L, steps=3000, lr=1e-3, kmeans_init=True, reset_dead=True,
         opt.step()
         if reset_dead and step % 100 == 0 and step < steps:
             with torch.no_grad():
-                r = m.enc(X)
+                r = m.enc(X[rows])
                 for level in range(L):
                     c = torch.cdist(r, m.books[level]).argmin(1)
                     dead = torch.nonzero(torch.bincount(c, minlength=K) == 0).flatten()
                     if len(dead):
-                        pick = torch.randint(len(X), (len(dead),), generator=gen)
+                        pick = torch.randint(len(r), (len(dead),), generator=gen)
                         m.books[level][dead] = r[pick]
                     r = r - m.books[level][torch.cdist(r, m.books[level]).argmin(1)]
     with torch.no_grad():
@@ -170,12 +182,14 @@ def train_rqvae(x, K, L, steps=3000, lr=1e-3, kmeans_init=True, reset_dead=True,
     return m, codes.numpy(), err
 
 
-def disambiguate(codes):
+def disambiguate(codes, late=None):
     """Listing 13.3. Appends one code: 0 for the first item with a given sequence of codes,
-    1 for the second, and so on, so that no two items share an ID (TIGER)."""
+    1 for the second, and so on, so that no two items share an ID (TIGER). Items marked
+    late (uploaded later) take their numbers after the others, so earlier IDs never change."""
+    late = np.zeros(len(codes), dtype=bool) if late is None else np.asarray(late)
     _, group = np.unique(codes, axis=0, return_inverse=True)
     group = group.ravel()
-    order = np.argsort(group, kind="stable")
+    order = np.lexsort((np.arange(len(codes)), late, group))      # by group, then earlier items first
     rank = np.empty(len(codes), dtype=np.int64)
     first = np.r_[0, np.flatnonzero(np.diff(group[order])) + 1]
     sizes = np.diff(np.r_[first, len(order)])

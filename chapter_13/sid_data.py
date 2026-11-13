@@ -14,7 +14,8 @@ never trained on.
 
   world()                 - the scale world (Chapter 12), with its items rebuilt so that
                             their titles and hidden encoders' inputs are known
-  content(W)              - one content vector per video (videos numbered 0 to V - 1)
+  content(W)              - one content vector per video (videos numbered 0 to V - 1),
+                            its title weights learned from the videos before day 23
   NEW_SHARE, new_videos   - the share of videos held back, and which they are
   data(W, k)              - training, validation and test windows (Chapter 12's
                             request-time windows), with the new videos' early clicks
@@ -48,7 +49,7 @@ from large_models import scored, windows  # noqa: E402
 from tesselo_data import Config, make_world  # noqa: E402
 from tesselo_shop import add_attributes  # noqa: E402
 from content_data import modalities  # noqa: E402
-from content_models import fuse, tfidf  # noqa: E402
+from content_models import fuse  # noqa: E402
 
 NEW_SHARE = 0.10
 K = 64                                                   # Chapter 12's window
@@ -86,12 +87,33 @@ def world():
     return W
 
 
+def title_tfidf(docs, fit):
+    """Unit-length TF-IDF rows, with the vocabulary and the word weights learned from the
+    documents marked by fit only; words seen only in other documents are dropped."""
+    vocab = {}
+    for d, f in zip(docs, fit):
+        if f:
+            for t in d:
+                vocab.setdefault(t, len(vocab))
+    X = np.zeros((len(docs), len(vocab)))
+    for r, d in enumerate(docs):
+        for t in d:
+            if t in vocab:
+                X[r, vocab[t]] += 1
+    df = (X[fit] > 0).sum(0)
+    X = X * np.log(fit.sum() / df)
+    return X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-12)
+
+
 def content(W):
     """Each video's content vector: title TF-IDF, picture, video and sound, side by side,
     each block unit length and weighted equally; a video without sound has a zero sound
-    block (chapter_11/content_models.fuse)."""
+    block (chapter_11/content_models.fuse). The TF-IDF's words and weights are learned
+    from the videos that exist before day 23 only, not from the new videos' titles."""
     v = W["video"]
-    title = tfidf([list(map(str, W["items"]["title"][i])) for i in v]).toarray().astype(np.float32)
+    old = np.ones(len(v), dtype=bool)
+    old[new_videos(W)] = False
+    title = title_tfidf([list(map(str, W["items"]["title"][i])) for i in v], old).astype(np.float32)
     parts = [(title, np.ones(len(v), dtype=bool))]
     for name, (x, has) in modalities(W).items():
         parts.append((x[v], has[v]))

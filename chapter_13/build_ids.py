@@ -17,8 +17,12 @@
   sweep     - collaborative-aware IDs with 16, 64 or 256 codes per level and 2, 3 or 4
               levels: collisions, IDs, table rows and the taste the first code explains
 
+Every quantiser is fitted on the videos that exist before day 23 only; the 348 videos
+uploaded on day 23 are then given codes by the frozen quantiser, and take their extra
+code after the earlier videos that share their codes.
+
 Each RQ-VAE's codes are kept in chapter_13/cache, so an interrupted run resumes; the
-times shown are each training's own. Run from the repository root (about 30 minutes on 2
+times shown are each training's own. Run from the repository root (about 40 minutes on 2
 CPUs; add a part's name to run one):
     python chapter_13/build_ids.py
 """
@@ -60,16 +64,16 @@ def example():
           f"what is left ({r[0]:.2f}, {r[1]:.2f})")
 
 
-def line(label, codes, taste, cat, err=None, chance=False, sec=None):
+def line(label, codes, taste, cat, err=None, chance=False, sec=None, late=None):
     r = report(codes, K, taste, cat)
-    full = disambiguate(codes)
+    full = disambiguate(codes, late)
     if chance:                                   # shuffled codes: only the checks against taste mean anything
         print(f"  {label:<28}{'':>58}{r['taste_explained'][0]:>9.3f}{r['first_code_category']:>9.3f}")
         return full
     print(f"  {label:<28}{'' if err is None else f'{err:.4f}':>8}  {'/'.join(map(str, r['used'])):>9}  "
           f"{'/'.join(f'{p:.1f}' for p in r['perplexity']):>15}{r['unique_ids']:>8,}{r['colliding_items']:>8,}"
           f"{r['largest_group']:>6}{r['taste_explained'][0]:>9.3f}{r['first_code_category']:>9.3f}"
-          f"{sum(prefixes(full)[1]):>8,}" + ("" if sec is None else f"  [{sec:.0f} s]"), flush=True)
+          f"{sum(prefixes(full, late)[1]):>8,}" + ("" if sec is None else f"  [{sec:.0f} s]"), flush=True)
     return full
 
 
@@ -91,6 +95,9 @@ if __name__ == "__main__":
     taste, cat = W["items"]["vec"][v], W["items"]["category"][v]
     D = data(W)
     pairs = co_clicks(D)
+    new = np.zeros(len(v), dtype=bool)                     # uploaded on day 23: never used to fit a quantiser
+    new[new_videos(W)] = True
+    old = ~new
     head = (f"  {'':<28}{'error':>8}  {'used':>9}  {'perplexity':>15}{'IDs':>8}{'shared':>8}{'max':>6}"
             f"{'taste':>9}{'category':>9}{'rows':>8}")
     print(f"\n{len(v):,} videos; content vectors of {X.shape[1]} numbers; {len(pairs):,} co-click pairs from the "
@@ -99,13 +106,13 @@ if __name__ == "__main__":
         print(f"\nSemantic IDs of {L} codes of {K}:")
         print(head)
         rng = np.random.default_rng(0)
-        codes, rec, _ = rq_kmeans(X, K, L)
-        line("chance (codes shuffled)", rng.permutation(codes), taste, cat, chance=True)
-        km = line("RQ-KMeans, content", codes, taste, cat, float(((rec - X) ** 2).sum() / (X ** 2).sum()))
-        codes, err, sec = rqvae("rqvae_content", X, K, L)
-        vae = line("RQ-VAE, content", codes, taste, cat, err, sec=sec)
-        codes, err, sec = rqvae("rqvae_co_clicks", X, K, L, pairs=pairs)
-        col = line("RQ-VAE, content + co-clicks", codes, taste, cat, err, sec=sec)
+        codes, rec, _ = rq_kmeans(X, K, L, fit=old)
+        line("chance (codes shuffled)", rng.permutation(codes), taste, cat, chance=True, late=new)
+        km = line("RQ-KMeans, content", codes, taste, cat, float(((rec - X) ** 2).sum() / (X ** 2).sum()), late=new)
+        codes, err, sec = rqvae("rqvae_content", X, K, L, fit=old)
+        vae = line("RQ-VAE, content", codes, taste, cat, err, sec=sec, late=new)
+        codes, err, sec = rqvae("rqvae_co_clicks", X, K, L, pairs=pairs, fit=old)
+        col = line("RQ-VAE, content + co-clicks", codes, taste, cat, err, sec=sec, late=new)
         np.savez_compressed(FILE, rq_kmeans=km, rq_vae=vae, rq_vae_co_clicks=col)
         print(f"  (error: squared reconstruction error over the content's own; used: codes used at each level; "
               f"perplexity: exp of the entropy of code use, {K} if all are used equally; IDs: distinct sequences of "
@@ -113,12 +120,10 @@ if __name__ == "__main__":
               f"sequence; taste: share of the variance of the hidden taste explained by the first code's groups; "
               f"category: share of videos in the most common category of their first code; rows: embedding rows "
               f"of Listing 13.5 with the extra code; [s]: training time)")
-        new = np.zeros(len(v), dtype=bool)
-        new[new_videos(W)] = True
         print("New videos whose prefix of 1, 2, 3 or 4 codes a trained video also has (rows of Listing 13.5 that "
               "a new video shares):")
         for name, c in (("RQ-KMeans", km), ("RQ-VAE", vae), ("RQ-VAE + co-clicks", col)):
-            g, _ = prefixes(c)
+            g, _ = prefixes(c, new)
             share = [np.isin(g[new, j], g[~new, j]).mean() for j in range(g.shape[1])]
             print(f"  {name:<20}" + "".join(f"{x:>7.3f}" for x in share))
     if "collapse" in parts:
@@ -126,9 +131,9 @@ if __name__ == "__main__":
         print(head)
         for init, reset in ((False, False), (True, False), (False, True), (True, True)):
             name = "rqvae_content" if init and reset else f"collapse_{int(init)}{int(reset)}"   # the same as build's
-            codes, err, sec = rqvae(name, X, K, L, kmeans_init=init, reset_dead=reset)
+            codes, err, sec = rqvae(name, X, K, L, kmeans_init=init, reset_dead=reset, fit=old)
             line(f"k-means start {'yes' if init else 'no'}, reset {'yes' if reset else 'no'}", codes, taste, cat, err,
-                 sec=sec)
+                 sec=sec, late=new)
     if "sweep" in parts:
         print("\nCodebook size and ID length: RQ-VAE on content + co-clicks:")
         print(f"  {'codes':>6}{'levels':>8}{'IDs':>8}{'shared':>8}{'max':>6}{'taste':>9}{'chance':>9}{'rows':>8}")
@@ -136,9 +141,9 @@ if __name__ == "__main__":
         for k in (16, 64, 256):
             for lv in (2, 3, 4):
                 name = "rqvae_co_clicks" if (k, lv) == (K, L) else f"sweep_{k}_{lv}"            # the same as build's
-                codes, err, sec = rqvae(name, X, k, lv, pairs=pairs)
+                codes, err, sec = rqvae(name, X, k, lv, pairs=pairs, fit=old)
                 r = report(codes, k, taste, cat)
-                rows = sum(prefixes(disambiguate(codes))[1])
+                rows = sum(prefixes(disambiguate(codes, new), new)[1])
                 chance = report(rng.permutation(codes), k, taste)["taste_explained"][0]
                 print(f"  {k:>6}{lv:>8}{r['unique_ids']:>8,}{r['colliding_items']:>8,}{r['largest_group']:>6}"
                       f"{r['taste_explained'][0]:>9.3f}{chance:>9.3f}{rows:>8,}  [{sec:.0f} s]", flush=True)

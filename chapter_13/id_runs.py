@@ -14,7 +14,7 @@ The measures are on the held-out users' test clicks of days 23 to 30, split by t
 clicked video: common, rare (a warm video in the bottom half by training clicks) and
 new (never in training). For each: the cross-entropy (nats; lower is better) and
 recall@20 (the share of clicks whose video is among the 20 the model scores highest of
-all 3,480). The differences on new videos come with 95% intervals from 1,000 bootstrap
+all 3,480, with ties broken at random). The differences on new videos come with 95% intervals from 1,000 bootstrap
 draws of whole users.
 
 Needs build_ids.py's sids.npz (and, for length, its cached sweep). Each arm's results are
@@ -37,7 +37,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "chapter_09"))
 from sid_data import SLICE_NAMES, cached, co_clicks, content, data, new_videos, slices, world  # noqa: E402
 from quantise import disambiguate, train_rqvae  # noqa: E402
-from id_models import ItemLM, evaluate, table_rows  # noqa: E402
+from id_models import ItemLM, evaluate, hit_rate, table_rows  # noqa: E402
 from large_models import fit  # noqa: E402
 from seq_data import environment  # noqa: E402
 
@@ -54,7 +54,7 @@ def run(name, label, D, new, sl, **kw):
     out, sec = cached(name, train)
     r = out["eval"]
     s = sl[r["video"]]
-    cells = "".join(f"{r['ce'][s == j].mean():>10.4f}{(r['rank'][s == j] < TOP).mean():>8.4f}" for j in range(3))
+    cells = "".join(f"{r['ce'][s == j].mean():>10.4f}{hit_rate(r, TOP)[s == j].mean():>8.4f}" for j in range(3))
     print(f"  {label:<32}{out['rows']:>7,}{len(out['curve']):>4}{int(np.argmin(out['curve'])) + 1:>5}{cells}"
           f"{r['ce'].mean():>9.4f}  [{sec:.0f} s]", flush=True)
     return r
@@ -108,7 +108,7 @@ if __name__ == "__main__":
         R["SID co-clicks, rows dropped"] = run("arm_co_clicks_drop", "  the same, fine rows dropped", D, new, sl,
                                                use_id=False, codes=Z["rq_vae_co_clicks"], drop=0.5)
         print(f"  (rows: item vectors learned; ep: epochs run; best: the epoch kept; CE: test cross-entropy; R@20: "
-              f"recall@{TOP}; [s]: training time)")
+              f"recall@{TOP}, ties broken at random; [s]: training time)")
         user = D["test_user"][R["random ID"]["window"]]
         is_new = sl[R["random ID"]["video"]] == 2
         print("\nNew videos, difference in cross-entropy (95% interval, 1,000 draws of whole users):")
@@ -126,7 +126,8 @@ if __name__ == "__main__":
             if k == 64:
                 codes = Z["rq_vae_co_clicks"]
             else:
-                codes = disambiguate(cached(f"sweep_{k}_3", lambda: train_rqvae(X, k, 3, pairs=pairs)[1:])[0][0])
+                codes = cached(f"sweep_{k}_3", lambda: train_rqvae(X, k, 3, pairs=pairs, fit=~new)[1:])[0][0]
+                codes = disambiguate(codes, new)
             name = "arm_co_clicks" if k == 64 else f"length_{k}"                    # the same as arms'
             run(name, f"{k} codes per level", D, new, sl, use_id=False, codes=codes)
     print(f"[{time.time() - t0:.0f} s]")
