@@ -5,3 +5,5 @@ __pycache__/
 chapter_11/text_embeddings.npz
 .venv-embed/
 chapter_12/scale_world.npz
+chapter_13/cache/
+chapter_13/sids.npz
