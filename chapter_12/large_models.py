@@ -1,9 +1,10 @@
 """Generative sequence models for Chapter 12: HSTU and SASRec at any size (sections 12.4 to 12.6).
 
 Both read a user's clicked videos in order and predict the next click over every video
-(a full softmax), the generative training of Chapter 9: every position of every
-sequence is a training example. A video's vector (d numbers) is used at the input and
-the output, as in Chapter 9, and a learned vector per position is added at the input.
+(a full softmax), the generative training of Chapter 9: every click with an earlier
+click before its request is a training example. A video's vector (d numbers) is used at
+the input and the output, as in Chapter 9, and a learned vector per position is added
+at the input.
 
   HSTU     - Meta's Hierarchical Sequential Transduction Unit (Zhai and colleagues,
              2024; Listing 12.2): one projection with a SiLU gives U, V, Q and K;
@@ -15,10 +16,11 @@ the output, as in Chapter 9, and a learned vector per position is added at the i
   SASRec   - a standard causal Transformer (Kang and McAuley, 2018), pre-norm, softmax
              attention and a feed-forward block 4 times as wide: 12 d^2 weights a layer.
 
-  windows(seqs, times, moments, k, lo, hi) - sequences cut into windows of k + 1
-                                  clicks, so every click is predicted from 1 to k earlier
-                                  ones, at the moment of its request; only targets whose
-                                  time is in [lo, hi) are scored
+  windows(seqs, times, moments, k, lo, hi) - sequences cut into windows of up to k
+                                  clicks; every click is predicted at the moment of its
+                                  request, from the 1 to k clicks of its window made
+                                  before then; only targets whose time is in [lo, hi)
+                                  are scored
   train_flops(model, k)         - training compute per predicted click (Listing 12.3)
   serving_cost(model, k, n)     - forward FLOPs per request, and the time of a batch of
                                   n requests (section 12.7)
@@ -179,81 +181,115 @@ def serving_cost(model, k=64, n=64):
 
 
 def windows(seqs, times, moments, k, lo=-math.inf, hi=math.inf):
-    """Every sequence cut into consecutive windows of k + 1 clicks: the first k are inputs
-    and each of the last k is predicted from the clicks before it in the window. moments
-    gives, for each click, the moment it is predicted at: the time of the request that
-    led to it, which a server knows when the request arrives (None: the click's own
-    time). A target is scored only if its click time is in [lo, hi). Returns (videos,
-    times, moments, scored) per window, keeping only windows with a scored target."""
-    xs, ts, ms, sc = [], [], [], []
-    moments = times if moments is None else moments
-    for s, t, m in zip(seqs, times, moments):
-        for a in range(0, max(len(s) - 1, 1), k):
-            x, tt, mm = s[a:a + k + 1], t[a:a + k + 1], m[a:a + k + 1]
-            ok = (tt[1:] >= lo) & (tt[1:] < hi)
-            if len(x) >= 2 and ok.any():
-                xs.append(x)
-                ts.append(tt)
-                ms.append(mm)
-                sc.append(ok)
-    return xs, ts, ms, sc
+    """Every sequence cut into windows of up to k clicks. Each click is predicted at a
+    moment: the time of the request that led to it, which a server knows when the
+    request arrives. It is predicted from the clicks made before that moment only, so
+    its prediction is read at the last of them, and clicks from the same row share that
+    history. With moments None, as in Chapter 9's logs, which keep no request times,
+    each click is predicted at its own time from the clicks before it in the user's
+    order. A click with no earlier click is not predicted. A window holds the clicks
+    whose prediction is read in it, up to the last of those clicks; a target is scored
+    only if its click time is in [lo, hi). Returns, per window, (videos, times, the
+    moment each position predicts at, where each target is read, targets, scored),
+    keeping only windows with a scored target."""
+    out = [], [], [], [], [], []
+
+    def keep(x, tt, mm, at, y, ok):
+        if ok.any():
+            for part, v in zip(out, (x, tt, mm, at, y, ok)):
+                part.append(v)
+
+    for u, (s, t) in enumerate(zip(seqs, times)):
+        if moments is None:                                             # each click from the ones before it
+            m, read = t, np.arange(len(s)) - 1
+        else:
+            m = moments[u]
+            read = np.searchsorted(t, m, side="left") - 1              # the last click before each request
+        ahead = np.r_[m[1:], t[-1:]]                                    # by default, the next click's moment
+        ok = (t >= lo) & (t < hi)
+        for a in range(0, len(s), k):
+            b = min(a + k, len(s))
+            j = np.flatnonzero((read >= a) & (read < b))               # the targets read in this window
+            mm = ahead[a:b].copy()
+            extra = []
+            for p in np.unique(read[j]):
+                at = j[read[j] == p]
+                first = m[at].min()
+                mm[p - a] = first                                       # a position predicts at its request
+                for later in np.unique(m[at][m[at] > first]):           # another request with no click between:
+                    i = at[m[at] == later]                              # its own copy of the history
+                    mx = mm[:p - a + 1].copy()
+                    mx[-1] = later
+                    extra.append((s[a:p + 1], t[a:p + 1], mx, read[i] - a, s[i], ok[i]))
+                j = np.setdiff1d(j, at[m[at] > first])
+            if len(j):
+                e = read[j].max() + 1                                   # up to the last click read
+                keep(s[a:e], t[a:e], mm[:e - a], read[j] - a, s[j], ok[j])
+            for e in extra:
+                keep(*e)
+    return out
 
 
-def tensors(xs, ts, ms, sc, pad):
+def tensors(xs, ts, ms, at, ys, sc, pad):
+    """Right-padded inputs, their times and moments, where each scored target is read
+    (window, position) and the targets."""
     n = max(len(x) for x in xs)
     X = np.full((len(xs), n), pad)
     T = np.zeros((len(xs), n))
     M = np.zeros((len(xs), n))
-    Y = np.full((len(xs), n - 1), pad)
-    for r, (x, t, m, ok) in enumerate(zip(xs, ts, ms, sc)):
+    rows, pos, Y = [], [], []
+    for r, (x, t, m, p, y, ok) in enumerate(zip(xs, ts, ms, at, ys, sc)):
         X[r, :len(x)] = x
-        T[r, :len(t)] = t
-        T[r, len(t):] = t[-1]
-        M[r, :len(m)] = m
-        M[r, len(m):] = m[-1]
-        Y[r, :len(x) - 1] = np.where(ok, x[1:], pad)          # targets not scored are padding
-    T = torch.as_tensor(T, dtype=torch.float32)
-    M = torch.as_tensor(M, dtype=torch.float32)
-    return torch.as_tensor(X[:, :-1]), T[:, :-1], M[:, 1:], torch.as_tensor(Y)
+        T[r, :len(t)], T[r, len(t):] = t, t[-1]
+        M[r, :len(m)], M[r, len(m):] = m, m[-1]
+        rows.append(np.full(int(ok.sum()), r))
+        pos.append(p[ok])
+        Y.append(y[ok])
+    where = (torch.as_tensor(np.concatenate(rows)), torch.as_tensor(np.concatenate(pos)))
+    return (torch.as_tensor(X), torch.as_tensor(T, dtype=torch.float32), torch.as_tensor(M, dtype=torch.float32),
+            where, torch.as_tensor(np.concatenate(Y)))
+
+
+def scored(data):
+    """The number of scored targets in windows(...)."""
+    return int(sum(ok.sum() for ok in data[5]))
 
 
 def batches(data, pad, batch, gen=None):
-    """(inputs, input times, the moments the targets are predicted at, targets) in
-    batches of windows of similar length; shuffled when a random generator is given."""
-    xs, ts, ms, sc = data
-    length = torch.as_tensor([len(x) for x in xs], dtype=torch.float32)
-    order = torch.argsort(length + (torch.rand(len(xs), generator=gen) if gen is not None else 0))
+    """(inputs, input times, the moment each position predicts at, where the targets are
+    read, targets) in batches of windows of similar length; shuffled when a random
+    generator is given."""
+    length = torch.as_tensor([len(x) for x in data[0]], dtype=torch.float32)
+    order = torch.argsort(length + (torch.rand(len(length), generator=gen) if gen is not None else 0))
     groups = list(torch.split(order, batch))
     if gen is not None:
         groups = [groups[g] for g in torch.randperm(len(groups), generator=gen).tolist()]
     for g in groups:
         g = g.tolist()
-        yield tensors([xs[i] for i in g], [ts[i] for i in g], [ms[i] for i in g], [sc[i] for i in g], pad)
+        yield tensors(*([part[i] for i in g] for part in data), pad)
 
 
 def loss(model, data, batch=256):
-    """Mean cross-entropy (nats) of every scored next click in data."""
+    """Mean cross-entropy (nats) of every scored target in data."""
     model.eval()
     total, count = 0.0, 0
     with torch.no_grad():
-        for x, t, tn, y in batches(data, model.pad, batch):
-            h = model.encode(x, t, tn)
-            keep = y != model.pad
-            total += F.cross_entropy(model.logits(h[keep]), y[keep], reduction="sum").item()
-            count += int(keep.sum())
+        for x, t, tn, where, y in batches(data, model.pad, batch):
+            h = model.encode(x, t, tn)[where]
+            total += F.cross_entropy(model.logits(h), y, reduction="sum").item()
+            count += len(y)
     return total / max(count, 1)
 
 
-def distill_loss(student, teacher, x, t, tn, y, weight=0.5, temp=2.0):
+def distill_loss(student, teacher, x, t, tn, where, y, weight=0.5, temp=2.0):
     """Section 12.6. The student's loss: (1 - weight) x its cross-entropy on the real next
     click, plus weight x temp^2 x the KL divergence from the teacher's softened
     distribution over every video to its own."""
-    keep = y != student.pad
-    s = student.logits(student.encode(x, t, tn)[keep])
+    s = student.logits(student.encode(x, t, tn)[where])
     with torch.no_grad():
-        p = F.softmax(teacher.logits(teacher.encode(x, t, tn)[keep]) / temp, dim=-1)
+        p = F.softmax(teacher.logits(teacher.encode(x, t, tn)[where]) / temp, dim=-1)
     kl = F.kl_div(F.log_softmax(s / temp, dim=-1), p, reduction="batchmean")
-    return (1 - weight) * F.cross_entropy(s, y[keep]) + weight * temp ** 2 * kl
+    return (1 - weight) * F.cross_entropy(s, y) + weight * temp ** 2 * kl
 
 
 def fit(model, train, valid, epochs, lr=1e-3, batch=128, seed=0, teacher=None, log=None, patience=None):
@@ -267,12 +303,11 @@ def fit(model, train, valid, epochs, lr=1e-3, batch=128, seed=0, teacher=None, l
     curve, best, state = [], math.inf, None
     for e in range(1, epochs + 1):
         model.train()
-        for x, t, tn, y in batches(train, model.pad, batch, gen):
+        for x, t, tn, where, y in batches(train, model.pad, batch, gen):
             if teacher is None:
-                keep = y != model.pad
-                L = F.cross_entropy(model.logits(model.encode(x, t, tn)[keep]), y[keep])
+                L = F.cross_entropy(model.logits(model.encode(x, t, tn)[where]), y)
             else:
-                L = distill_loss(model, teacher, x, t, tn, y)
+                L = distill_loss(model, teacher, x, t, tn, where, y)
             opt.zero_grad()
             L.backward()
             opt.step()

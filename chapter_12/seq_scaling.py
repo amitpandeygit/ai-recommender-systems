@@ -4,12 +4,13 @@ In the scale world (scale_world.py), HSTU and SASRec (large_models.py) learn to 
 each user's next video click. They train on 90% of the users' clicks before day 23; the
 other 10% of users are held out. The validation loss is the mean cross-entropy (nats)
 of the held-out users' clicks before day 23, and it chooses the epoch; the test loss is
-the same for their clicks in days 23 to 30, each predicted from the earlier clicks in
-its window. Lower is better. Two references: predicting every click with the training
-clicks' popularity, and the cross-entropy of a uniform guess over all videos.
+the same for their clicks in days 23 to 30. Each click is predicted at the moment of
+the request that led to it, from the clicks made before that moment in its window.
+Lower is better. Two references: predicting every click with the training clicks'
+popularity, and the cross-entropy of a uniform guess over all videos.
 
   size     - 7 sizes (width d and layers) from d 16 with 1 layer to d 256 with 4 layers,
-             6 epochs each, with every click and windows of 64 (Figure 12.3). Every
+             6 epochs each, with every click and windows of 64 (Figure 12.5). Every
              epoch of every run is a point (compute, validation loss); the lowest loss
              at or below each compute forms the frontier, fitted with a power law in
              compute (scaling_laws.py), and the best test loss of each size is fitted
@@ -24,7 +25,7 @@ clicks' popularity, and the cross-entropy of a uniform guess over all videos.
 
 Compute is train_flops (Listing 12.3) times the training clicks seen.
 
-Needs Python 3.12 or later, PyTorch and SciPy. Run from the repository root (about 2.5
+Needs Python 3.12 or later, PyTorch and SciPy. Run from the repository root (about 2.75
 hours on 2 CPUs; add size, data or length to run one part):
     python chapter_12/seq_scaling.py
 """
@@ -41,7 +42,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "chapter_09"))
 from scale_world import DAY, load, sequences  # noqa: E402
-from large_models import SeqLM, fit, loss, train_flops, windows  # noqa: E402
+from large_models import SeqLM, fit, loss, scored, train_flops, windows  # noqa: E402
 from scaling_laws import doubling, fit_power_law, frontier  # noqa: E402
 from seq_data import environment  # noqa: E402
 
@@ -53,14 +54,14 @@ MID = (64, 2)
 
 
 def clicks(data):
-    return int(sum(s.sum() for s in data[3]))
+    return scored(data)
 
 
 def references(D, test):
     """Test loss of the training clicks' popularity (add-one smoothed), and of a uniform guess."""
     counts = np.bincount(np.concatenate(D["train"][0]), minlength=D["n_videos"]) + 1.0
     logp = np.log(counts / counts.sum())
-    y = np.concatenate([x[1:][ok] for x, ok in zip(test[0], test[3])])
+    y = np.concatenate([y[ok] for y, ok in zip(test[4], test[5])])
     return -logp[y].mean(), np.log(D["n_videos"])
 
 

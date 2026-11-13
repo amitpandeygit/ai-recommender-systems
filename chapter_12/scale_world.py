@@ -131,3 +131,18 @@ if __name__ == "__main__":
     print(f"  clicks per consenting user with a click: {len(per_user):,} users; mean {per_user.mean():.1f}; "
           f"10th, 50th, 90th and 99th percentiles "
           f"{q[0]:.0f}, {q[1]:.0f}, {q[2]:.0f}, {q[3]:.0f}")
+    D = sequences(W)
+    print("  Clicks after each user's first, and the clicks before their request (section 12.5):")
+    for label, (S, T, R), lo, hi in (("training users, before day 23", D["train"], -np.inf, 23 * DAY),
+                                     ("held-out users, before day 23", D["held"], -np.inf, 23 * DAY),
+                                     ("held-out users, days 23 to 30", D["held"], 23 * DAY, np.inf)):
+        n = late = same_row = none = 0
+        for s, t, r in zip(S, T, R):
+            ok = (t[1:] >= lo) & (t[1:] < hi)
+            after = (t[:-1] >= r[1:]) & ok                 # the click before was made after this one's request
+            n += ok.sum()
+            late += after.sum()
+            same_row += (after & (r[:-1] == r[1:])).sum()
+            none += ((t[0] >= r[1:]) & ok).sum()           # no click at all before the request
+        print(f"    {label}: {n:,}; the click before came after the request for {late:,} ({late / n:.1%}), "
+              f"{same_row:,} of them from the same row; no click before the request: {none:,}")

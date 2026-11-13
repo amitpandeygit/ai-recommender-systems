@@ -26,7 +26,7 @@ Each model's serving cost is its forward FLOPs for one request with 64 earlier c
 (large_models.serving_cost); training cost per click adds, for the distilled student,
 the teacher's forward pass.
 
-Needs Python 3.12 or later and PyTorch. Run from the repository root (about 30 minutes):
+Needs Python 3.12 or later and PyTorch. Run from the repository root (about 35 minutes):
     python chapter_12/distill.py
 """
 import os
@@ -42,7 +42,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "chapter_09"))
 from scale_world import DAY, load, sequences  # noqa: E402
-from large_models import SeqLM, fit, loss, serving_cost, train_flops, windows  # noqa: E402
+from large_models import SeqLM, fit, loss, scored, serving_cost, train_flops, windows  # noqa: E402
 from seq_data import environment  # noqa: E402
 
 K = 64
@@ -66,8 +66,7 @@ if __name__ == "__main__":
     order = np.random.default_rng(1).permutation(len(D["train"][0]))
     keep = order[:int(round(SHARE * len(order)))]
     own = windows(*([a[i] for i in keep] for a in D["train"]), K)
-    n_own = int(sum(s.sum() for s in own[3]))
-    n_all = int(sum(s.sum() for s in train[3]))
+    n_own, n_all = scored(own), scored(train)
     print(f"Teacher data: {n_all:,} training clicks; the student's surface: {len(keep):,} users, {n_own:,} clicks  "
           f"[{time.time() - t0:.0f} s]")
     print(f"  {'':<26}{'params':>11}{'FLOPs/request':>15}{'train/click':>14}{'epochs':>8}{'best':>6}"
