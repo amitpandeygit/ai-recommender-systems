@@ -97,7 +97,8 @@ def beam_search(model, h, trie=None, beams=(16, 16, 16, 16), banned=None):
     of its codes' log probabilities. With a trie, only codes that lead to a live video
     are allowed, and each level's probabilities are renormalised over them. banned
     (n x V, True = not allowed for this request) removes videos at the last level.
-    Returns the videos (n x beams[-1], -1 where an ID names no video) and their scores."""
+    Returns the videos (n x beams[-1]; -1 where an ID names no video, or where fewer
+    allowed videos exist than were asked for) and their scores."""
     n = len(h)
     z = h[:, None, :]                                          # n x 1 x d: one beam, the empty prefix
     node = torch.zeros(n, 1, dtype=torch.long)
@@ -107,13 +108,13 @@ def beam_search(model, h, trie=None, beams=(16, 16, 16, 16), banned=None):
         logit = model.head[j](z)                               # n x beams x K
         if trie is not None:
             nxt = trie.child[j][node.clamp(min=0)]             # n x beams x K: child node, -1 if none
-            ok = nxt >= 0
+            ok = (nxt >= 0) & (node >= 0)[:, :, None]          # a dead prefix has no children
             if j == len(beams) - 1 and banned is not None:
                 vid = trie.leaf[nxt.clamp(min=0)].clamp(min=0)
                 ok &= ~torch.gather(banned, 1, vid.flatten(1)).view(vid.shape)
             logit = logit.masked_fill(~ok, -math.inf)
         lp = torch.log_softmax(logit, -1)
-        lp = torch.nan_to_num(lp, nan=-math.inf)              # a beam with no valid child
+        lp = torch.nan_to_num(lp, nan=-math.inf, neginf=-math.inf)   # a beam with no valid child
         total = (score[:, :, None] + lp).flatten(1)             # n x (beams x K)
         top = total.topk(min(B, total.shape[1]), dim=1)
         k = logit.shape[-1]
@@ -164,7 +165,7 @@ def all_logprob(model, h, trie, constrained=True):
             first[groups[:, j]] = torch.arange(V)               # a video in each node, to find its code
             nz = model.advance(z[:, parent[first]], j, codes[first, j].expand(len(h), -1))
             z, parent = nz, groups[:, j]
-    out = torch.nan_to_num(out, nan=-math.inf)
+    out = torch.nan_to_num(out, nan=-math.inf, neginf=-math.inf)
     return out.masked_fill((trie.leaf[groups[:, -1]] < 0)[None], -math.inf) if constrained else out
 
 

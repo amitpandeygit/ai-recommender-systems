@@ -158,13 +158,15 @@ def found(v, Y, k):
 
 @torch.no_grad()
 def cost(model, width=None):
-    """Forward FLOPs and milliseconds per request for the output stage alone: scoring
-    every video (width None) or a constrained beam search, from 64 requests' states."""
+    """Forward FLOPs per request for the output stage alone, scoring every video (width
+    None) or a constrained beam search (widths per level), from 64 requests' states, and
+    the median time of the batch of 64 divided by 64 (time per request in a batch, not
+    the latency of one request)."""
     x, t, tn = request_batch(model.n_videos, 64, 64)
     model.uploaded = True
     h = model.encode(x, t, tn)[:, -1]
     run = (lambda: model.logits(h)) if width is None else \
-        (lambda: beam_search(model, h, model._trie, (width,) * len(model.sizes)))
+        (lambda: beam_search(model, h, model._trie, width))
     with FlopCounterMode(display=False) as fc:
         run()
     times = []
@@ -277,6 +279,11 @@ if __name__ == "__main__":
         agree = (v[:, :10, None] == e["top10"][:, None, :]).any(2).float().mean(1).numpy()
         line(f"generator, beam {B}", np.full(len(Y), np.nan), [found(v, Y, k) for k in TOP], sl,
              f"   agreement with exact top 10 {agree.mean():.4f}")
+    for B in WIDTHS:                                           # checks of what the search guarantees
+        v = bres[B][:, :10]
+        dup = sum(len(r[r >= 0]) - len(np.unique(r[r >= 0])) for r in v.numpy())
+        print(f"  check, beam {B}: top 10 slots with no video {(v < 0).float().mean().item():.4f}; "
+              f"repeated videos {dup}")
     plain = exact(gen, H, Y, trie, constrained=False)
     print(f"  (CE: test cross-entropy, nats; R@k: recall@k, ties broken at random for the full rankings; a beam "
           f"of width B returns its best max(B, 20); agreement: share of the exact top 10 that the beam's top 10 holds)")
@@ -289,15 +296,19 @@ if __name__ == "__main__":
               f"{(v[:, :k] < 0).float().mean().item():.4f}; clicks with at least one such ID "
               f"{(v[:, :k] < 0).any(1).float().mean().item():.4f}")
 
-    print("\nCost per request (64 requests of 64 clicks; FLOPs counted by FlopCounterMode):")
+    print("\nCost per request (64 requests of 64 clicks; FLOPs counted by FlopCounterMode; ms: a batch of 64 "
+          "requests, divided by 64):")
     ef = encoder_cost(gen)
     print(f"  encoder (both models, the same HSTU): {ef:,.0f} FLOPs")
     gen._trie = trie
     f, ms = cost(ref)
     print(f"  reference, a score for each of 3,480 videos: {f:,.0f} FLOPs, {ms:.3f} ms")
     for B in WIDTHS:
-        f, ms = cost(gen, B)
+        f, ms = cost(gen, (B,) * 4)
         print(f"  generator, beam {B:>3} over 4 levels: {f:,.0f} FLOPs, {ms:.3f} ms")
+    for w in ((100,) * 4, (512, 512, 512, 500)):                # the widths of section 14.5's reward-model arms
+        f, ms = cost(gen, w)
+        print(f"  generator, beams {'-'.join(map(str, w))}: {f:,.0f} FLOPs, {ms:.3f} ms")
 
     print("\nOther IDs: the generator on RQ-KMeans IDs (content only, OneRec's tokenizer):")
     print(HEAD)

@@ -326,6 +326,21 @@ def fit_ranker(x, slot, click, play, epochs, seed=0, batch=1024, lr=1e-3, valid=
 
 
 # ---------------------------------------------------------------- rows and measures
+def row_checks(rows, banned, creator, cap=CAP):
+    """Checks of each row, independent of how it was made: slots holding a banned video,
+    repeated videos, rows with more than `cap` videos of one creator, and empty slots."""
+    rows = np.asarray(rows)
+    ok = rows >= 0
+    shown = np.zeros(rows.shape, dtype=bool)
+    shown[ok] = banned.numpy()[np.nonzero(ok)[0], rows[ok]]
+    dup = over = 0
+    for r in rows:
+        r = r[r >= 0]
+        dup += len(r) - len(np.unique(r))
+        over += int(len(r) > 0 and np.bincount(creator[r]).max() > cap)
+    return np.array([shown.sum(), dup, over, (~ok).sum()])
+
+
 def cap_rows(cands, creator, k=ROW, cap=CAP):
     """The first k candidates (in order) with at most `cap` videos per creator."""
     out = np.full((len(cands), k), -1)
@@ -360,7 +375,9 @@ def reward_pick(ranker, S, user, pool, vlang, creator):
 
 def value_pick(v, score, bid):
     """Listing 14.6. The ad among each request's beams (videos v, log probabilities
-    score) with the highest expected value, the generator's probability times the bid."""
+    score) with the highest value score, the generator's probability times the bid. The
+    probability is of the next video, not a calibrated click rate, so this ranks by
+    value; it does not estimate revenue."""
     val = torch.exp(score) * torch.as_tensor(bid, dtype=torch.float32)[v.clamp(min=0)]
     val = torch.where(v >= 0, val, -1.0)
     return torch.gather(v, 1, val.argmax(1, keepdim=True))[:, 0]
@@ -483,7 +500,7 @@ if __name__ == "__main__":
 
     B = 1024                                                   # requests per batch
     if "arms" in parts:
-        arms = {}
+        arms, checks = {}, {}
         for a in range(0, len(Q["user"]), B):
             sel = np.arange(a, min(a + B, len(Q["user"])))
             ban = banned_matrix(H, sel, V)
@@ -494,6 +511,7 @@ if __name__ == "__main__":
             def put(name, rows):
                 rows = np.where(nh[:, None], fallback[:, :ROW], rows)
                 arms.setdefault(name, []).append(rows)
+                checks[name] = checks.get(name, 0) + row_checks(rows, ban, creator)
 
             put("random", top_allowed(torch.as_tensor(rng.random((len(sel), V))), ban, ROW).numpy())
             put("most clicked", top_allowed(torch.as_tensor(np.broadcast_to(S23["ctr"], (len(sel), V)).copy()), ban,
@@ -580,6 +598,11 @@ if __name__ == "__main__":
               "expected satisfied plays per row; clicks: expected clicks per row; bait: share of slots with clickbait; "
               "new: share of slots with a video uploaded on day 23; cover: share of the 3,480 videos shown at least "
               "once; top10%: the top 10% of creators' share of position-weighted exposure)")
+        print(f"\nChecks of every row ({len(users_q) * ROW:,} slots): banned videos shown (already clicked), "
+              f"repeated videos, rows with more than {CAP} videos of one creator, empty slots")
+        for name, c in checks.items():
+            print(f"  {name:<46}" + "".join(f"{int(x):>8,}" for x in c))
+        print("  (the baselines before the cascade have no creator limit)")
         print("\nPaired differences in expected satisfied plays per row (95% interval, 1,000 draws of whole users):")
         for a_, b_ in (("generator, reward model picks 10 of 100", "cascade: iALS 100, ranker"),
                        ("generator, reward model picks 10 of 500", "cascade: iALS 500, ranker"),
@@ -648,6 +671,8 @@ if __name__ == "__main__":
                 picks.setdefault(f"value-weighted generator, beams {'-'.join(map(str, w))}", []).append(
                     value_pick(v, sc, bid).numpy())
         nb = ~has
+        allban = torch.cat([banned_matrix(H, np.arange(a, min(a + B, len(Q["user"]))), V)
+                            for a in range(0, len(Q["user"]), B)]) | torch.as_tensor(~spons)[None]
         print(f"  {'':<52}{'revenue':>9}{'plays':>9}{'clicks':>8}{'bait':>7}   revenue against the ranker (95% interval)")
         base_rev = None
         for name, p in picks.items():
@@ -668,6 +693,13 @@ if __name__ == "__main__":
                   f"{click[has, AD_SLOT - 1].mean():>8.4f}{bait:>7.1%}{d}", flush=True)
         print("  (per request with a history: revenue = expected coins from the ad slot; plays and clicks: expected "
               "satisfied plays and clicks there; bait: share of ads that are clickbait)")
+        print("  checks over requests with a history: ads that are banned (already clicked or not sponsored), "
+              "empty ad slots")
+        for name, p in picks.items():
+            p = np.concatenate(p)[has]
+            okp = p >= 0
+            bad = int(allban[torch.as_tensor(np.nonzero(has)[0][okp]), torch.as_tensor(p[okp])].sum())
+            print(f"  {name:<52}{bad:>8,}{int((~okp).sum()):>8,}")
         hb = hv[:64]
         for w in ((64, 64, 64, 64), (8, 16, 32, 64), (beam_w,) * 4):
             with FlopCounterMode(display=False) as fc:
