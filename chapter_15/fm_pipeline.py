@@ -19,7 +19,7 @@ ranker's logit, fitted on the validation week's impressions; the arms differ onl
   + FM embeddings, daily       - way 1: the user's embedding computed at the start of the
                                  request's day, in batch, scored against the model's item
                                  vectors; the request itself only reads stored vectors
-  + FM subgraph                - way 2, Listing 15.3: the foundation model's layers inside
+  + FM subgraph                - way 2, Listing 15.4: the foundation model's layers inside
                                  a downstream model that scores (request, video) pairs for a
                                  satisfied play, trained on impressions, the layers
                                  fine-tuned with a learning rate 10 times smaller
@@ -29,10 +29,10 @@ ranker's logit, fitted on the validation week's impressions; the arms differ onl
   control: fine-tuned, no pre-training - way 3's model from random weights
   + student                    - section 15.6: a small model (HSTU width 32, 1 layer, and a
                                  head) trained on the impressions alone
-  + student, distilled, candidates - Listing 15.4: the same, also matching the teacher's
+  + student, distilled, candidates - Listing 15.5: the same, also matching the teacher's
                                  scores over each training request's 50 candidates
   + student, distilled, all videos - the same over every video (Chapter 12's way); the
-                                 teacher's scores are saved once (Listing 15.5)
+                                 teacher's scores are saved once (Listing 15.6)
 
 The teacher is whichever of ways 2 and 3 has the lower validation log loss in its blend.
 Every model is fitted on what had arrived by day 16 to choose its epochs and blend, and
@@ -126,7 +126,7 @@ def request_tensors(src, H, T, t_req):
 
 
 class PairScorer(nn.Module):
-    """Listing 15.3. A downstream model that holds a sequence model as a subgraph: the
+    """Listing 15.4. A downstream model that holds a sequence model as a subgraph: the
     history is encoded once per request, and a small head scores each candidate video
     from the request's vector h, the video's vector v and their product. With the
     foundation model as `seq`, this is Netflix's subgraph; with a small new model, it is
@@ -251,7 +251,7 @@ class Requests:
 
 def bce_epoch(model, data, opt, gen, teacher=None, kd="none", batch=64):
     """One epoch of the downstream loss: binary cross-entropy of satisfied plays on the
-    impressions, plus, with a teacher, Listing 15.4's distillation term."""
+    impressions, plus, with a teacher, Listing 15.5's distillation term."""
     model.train()
     for req in data.batches(batch, gen):
         idx = np.concatenate([data.imps[int(k)] for k in req])
@@ -280,7 +280,7 @@ def bce_epoch(model, data, opt, gen, teacher=None, kd="none", batch=64):
 
 
 def distill_over(student, teacher, valid, temp=KD_TEMP):
-    """Listing 15.4. The KL divergence from the teacher's softened distribution over each
+    """Listing 15.5. The KL divergence from the teacher's softened distribution over each
     request's candidates to the student's (Chapter 12's distill_loss, over a set of
     candidates instead of every video); invalid candidates are left out of both."""
     s = (student / temp).masked_fill(~valid, -math.inf)
@@ -291,7 +291,7 @@ def distill_over(student, teacher, valid, temp=KD_TEMP):
 
 @torch.no_grad()
 def teacher_table(teacher, data, kd, batch=64):
-    """Listing 15.5. The teacher's score of every candidate of every request of data,
+    """Listing 15.6. The teacher's score of every candidate of every request of data,
     computed once and kept in 16-bit floats (requests x 50 for kd "candidates", requests x
     every video for "all"), so that training the student never runs the teacher again."""
     kind, m = teacher

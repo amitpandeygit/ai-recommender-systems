@@ -26,7 +26,7 @@ chapter needs on top of it:
                                    trained on, with the ID vector masked at random in
                                    training and replaced by one learned vector for
                                    unknown videos
-  stabilise(T, W, T0)            - Listing 15.6: Netflix's orthogonal low-rank
+  stabilise(T, W, T0)            - Listing 15.7: Netflix's orthogonal low-rank
                                    stabilisation (Zielnicki and Hsiao, 2025): rotate a
                                    retrained model's user and item vectors onto a
                                    reference run's, without changing any dot product
@@ -163,7 +163,7 @@ class GatedItemLM(ItemLM):
 
 
 def stabilise(T, W, T0=None):
-    """Listing 15.6. Orthogonal low-rank stabilisation (Zielnicki and Hsiao, 2025), in the
+    """Listing 15.7. Orthogonal low-rank stabilisation (Zielnicki and Hsiao, 2025), in the
     paper's notation: T holds a model's item vectors (items x e) and W its user vectors
     (users x e), and the scores are W @ T.T. Step 1 (low-rank SVD): from the QR
     factorisations T = Q_T R_T and W = Q_W R_W, the SVD of the small e x e matrix

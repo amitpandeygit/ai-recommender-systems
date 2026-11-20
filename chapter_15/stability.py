@@ -17,7 +17,7 @@ Users' embeddings are computed once a day, at midnight, from the clicks before i
 (fm_pipeline's daily embeddings); items' are the model's video vectors.
 
   offline    - for every video, the cosine between its vector in A and in B (or C), raw
-               and after Listing 15.6's stabilisation onto A; the same for each test
+               and after Listing 15.7's stabilisation onto A; the same for each test
                user's embedding at their first test request (the users the stabilisation
                is fitted on); and how many of each video's 10 nearest videos, and each test
                user's 10 highest-scoring videos at that request, two versions share
