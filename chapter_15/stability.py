@@ -16,11 +16,14 @@ width 128, 4 layers) and three versions of it:
 Users' embeddings are computed once a day, at midnight, from the clicks before it
 (fm_pipeline's daily embeddings); items' are the model's video vectors.
 
-  offline    - for every video, the cosine between its vector in A and in B (or C), raw
-               and after Listing 15.7's stabilisation onto A; the same for each test
-               user's embedding at their first test request (the users the stabilisation
-               is fitted on); and how many of each video's 10 nearest videos, and each test
-               user's 10 highest-scoring videos at that request, two versions share
+  offline    - every version is stabilised (Listing 15.7) when it is published, on that
+               night's embeddings of every consenting user with a history (A at midnight
+               of day 16; B and C at midnight of day 23, aligned with A), and the maps are
+               then frozen. For every video, the cosine between its vector in A and in B
+               (or C), raw and stabilised; the same for each test user's embedding at their
+               first test request; how many of each video's 10 nearest videos two
+               versions share, raw and stabilised; and how many of each test user's 10
+               highest-scoring videos they share, which no map can change
   consumer   - a downstream model (an MLP on the user's and the video's embeddings and the
                heavy ranker's logit, predicting a satisfied play) trained on the impressions
                before day 16, with its epochs chosen on the validation week and its blend
@@ -37,7 +40,8 @@ Users' embeddings are computed once a day, at midnight, from the clicks before i
                                                  embeddings of the impressions before day
                                                  23, with the raw consumer's epochs and blend
                inside Chapter 9's honest test: Chapter 8's production row, checked, with
-               expected satisfied plays, paired differences against A, guardrails.
+               expected satisfied plays, paired differences against A, guardrails. Its
+               labels are those the server had by each cutoff (fm_pipeline.observed_rows).
 
 Needs fm_pipeline.py's cache (the foundation model) and PyTorch. Run from the repository
 root (about 5 minutes on 2 CPUs, after fm_pipeline.py):
@@ -62,12 +66,12 @@ sys.path.insert(0, str(HERE))
 for _ch in ("chapter_12", "chapter_09"):
     sys.path.insert(0, str(HERE.parent / _ch))
 from fm_models import stabilise  # noqa: E402
-from fm_pipeline import FM, K, cached, day_requests, request_tensors  # noqa: E402
+from fm_pipeline import FM, K, cached, day_requests, observed_rows, request_tensors  # noqa: E402
 from large_models import fit  # noqa: E402
 from worth_it import HSTUSource, fit_hstu, timed_histories, timed_sequences  # noqa: E402
 from seq_data import (DAY, WORLDS, eligible_kept, environment, exclude_mask, forbidden_shown, histories,  # noqa: E402
                       load, ndcg, outcomes, paired, ranked_pools, requests)
-from pipeline_test import assemble_rows, features, first_allowed, heldout_rows, new_candidates  # noqa: E402
+from pipeline_test import assemble_rows, features, first_allowed, new_candidates  # noqa: E402
 from slate_data import rules, split, top_creators  # noqa: E402
 from filtering import RuleSets  # noqa: E402
 from honest_test import AD_SLOT, CREATOR_CAP, NEW_SLOT  # noqa: E402
@@ -161,6 +165,15 @@ def cos_rows(a, b):
     return (a * b).sum(1) / np.maximum(np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1), 1e-12)
 
 
+def neighbour_overlap(SA, SB, k=10):
+    """For each video, the share of its k nearest other videos (by the similarity matrices
+    SA and SB) that the two versions have in common."""
+    SA, SB = SA.copy(), SB.copy()
+    np.fill_diagonal(SA, -np.inf)
+    np.fill_diagonal(SB, -np.inf)
+    return top10_overlap(SA, SB, k)
+
+
 def top10_overlap(A, B, k=10):
     """For each row, the share of its k largest entries in A that are also among B's."""
     ta, tb = np.argsort(-A, axis=1)[:, :k], np.argsort(-B, axis=1)[:, :k]
@@ -199,40 +212,51 @@ if __name__ == "__main__":
     UC, _ = daily_users(fmC, W, R)
     first = np.unique(R["user"], return_index=True)[1]          # one request per test user, for user measures
     first = first[hasA[first]]
-    A_items, A_users, MTA, MWA = stabilise(VA, UA[first])
+
+    def anchor(src, day):
+        """The embeddings published at midnight of `day`: every consenting user with a history then."""
+        U, has = daily_users(src, W, {"user": W["consenting"], "time": np.full(len(W["consenting"]), day * DAY)})
+        return U[has]
+    # each version's maps are fitted when it is published, on that night's embeddings, and then frozen
+    A_items, _, MTA, MWA = stabilise(VA, anchor(fmA, 16))
     sv = {}
-    for label, V, U in (("B", VB, UB), ("C", VC, UC)):
-        Ts, Ws, MT, MW = stabilise(V, U[first], A_items)
+    nA = VA / np.linalg.norm(VA, axis=1, keepdims=True)
+    nAs = A_items / np.linalg.norm(A_items, axis=1, keepdims=True)
+    for label, src, V, U in (("B", fmB, VB, UB), ("C", fmC, VC, UC)):
+        _, _, MT, MW = stabilise(V, anchor(src, 23), A_items)
         sv[label] = (MT, MW)
+        Ts = V @ MT
         cos_raw_i, cos_st_i = cos_rows(VA, V).mean(), cos_rows(A_items, Ts).mean()
-        cos_raw_u, cos_st_u = cos_rows(UA[first], U[first]).mean(), cos_rows(A_users, Ws).mean()
-        nA = (VA / np.linalg.norm(VA, axis=1, keepdims=True)) @ (VA / np.linalg.norm(VA, axis=1, keepdims=True)).T
-        nV = (V / np.linalg.norm(V, axis=1, keepdims=True)) @ (V / np.linalg.norm(V, axis=1, keepdims=True)).T
-        np.fill_diagonal(nA, -np.inf)
-        np.fill_diagonal(nV, -np.inf)
+        cos_raw_u = cos_rows(UA[first], U[first]).mean()
+        cos_st_u = cos_rows(UA[first] @ MWA, U[first] @ MW).mean()
+        nV = V / np.linalg.norm(V, axis=1, keepdims=True)
+        nVs = Ts / np.linalg.norm(Ts, axis=1, keepdims=True)
         print(f"A against {label}: mean cosine of a video's vector, raw {cos_raw_i:+.3f}, stabilised {cos_st_i:+.3f}; "
               f"of a test user's embedding at their first test request, raw {cos_raw_u:+.3f}, "
-              f"stabilised {cos_st_u:+.3f}; "
-              f"shared of each video's 10 nearest videos {top10_overlap(nA, nV):.3f}; shared of each test user's "
+              f"stabilised {cos_st_u:+.3f}; shared of each video's 10 nearest videos, raw "
+              f"{neighbour_overlap(nA @ nA.T, nV @ nV.T):.3f}, stabilised "
+              f"{neighbour_overlap(nAs @ nAs.T, nVs @ nVs.T):.3f}; shared of each test user's "
               f"10 highest-scoring videos {top10_overlap(UA[first] @ VA.T, U[first] @ V.T):.3f}")
-        dot_err = np.abs(Ws @ Ts.T - U[first] @ V.T).max()
+        dot_err = np.abs((U[first] @ MW) @ Ts.T - U[first] @ V.T).max()
         print(f"  stabilisation changes no score: largest change in a user-video dot product {dot_err:.2e}")
+    print("  (maps fitted on the embeddings published at midnight of day 16 for A, and of day 23 for B and C, for "
+          "every consenting user with a history, then frozen; nearest videos by cosine, raw or after the maps)")
 
     # ---- the consumer: trained on A's (raw or stabilised) embeddings of the impressions before day 16
     sp16, sp23 = split(W, "validation"), split(W, "test")
 
-    def impressions(start, end, sp):
+    def impressions(start, end, sp, cutoff):
         Rq = requests(W, start, end)
         Hq, ivq = histories(W, Rq)
-        r, c, yy = heldout_rows(W, Rq, Hq, ivq)
+        r, c, yy = observed_rows(W, Rq, cutoff)
         hl = logit(score_pools(sp["heavy"], sp["S"], users, items, Rq["user"][r], c[:, None])[:, 0])
         return Rq, Hq, ivq, r, c, yy, hl
 
     def stab(U, V, maps):
         return (U, V) if maps is None else (U @ maps[1], V @ maps[0])
 
-    tr = impressions(0, 16, sp16)
-    va = impressions(16, 23, sp16)
+    tr = impressions(0, 16, sp16, 16 * DAY)
+    va = impressions(16, 23, sp16, 23 * DAY)
     UAtr, _ = daily_users(fmA, W, tr[0])
     UAva, _ = daily_users(fmA, W, va[0])
     Rv, Hv, ivv, rv, cv, yv, hlv = va
@@ -246,7 +270,7 @@ if __name__ == "__main__":
         wts[label] = fit_logistic(features(1 / (1 + np.exp(-hlv)), sc, ivv[rv]), yv)
     # the consumer retrained on B's embeddings of the impressions before day 23, with the raw consumer's epochs
     e_raw = int(np.argmin(curves["raw"])) + 1
-    tr23 = impressions(0, 23, sp23)
+    tr23 = impressions(0, 23, sp23, 23 * DAY)
     UBtr, _ = daily_users(fmB, W, tr23[0])
     cons["retrained on B"] = cached("stab_consumer_B_valid", lambda: fit_consumer(
         UBtr[tr23[3]], VB[fmB.renum[tr23[4]]], tr23[6], tr23[5], epochs=e_raw)[0])

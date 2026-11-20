@@ -171,11 +171,15 @@ def stabilise(T, W, T0=None):
     is one principal direction of the scores, largest first. Step 2 (orthogonal Procrustes,
     only if T0 is given): the rotation that best maps these item vectors onto a reference
     run's stabilised item vectors T0, the same items in the same order. Neither step changes
-    any user-item dot product. Returns the new item and user vectors and the maps M_T, M_W
-    (T @ M_T and W @ M_W) to apply to later vectors of the same run."""
+    any user-item dot product. Both need T and W of full rank e (the maps divide by the
+    singular values), so a near-singular case stops with an error rather than returning
+    vectors that are not finite. Returns the new item and user vectors and the maps M_T,
+    M_W (T @ M_T and W @ M_W) to apply to later vectors of the same run."""
     Q_T, R_T = np.linalg.qr(T)
     Q_W, R_W = np.linalg.qr(W)
     U, S, Vt = np.linalg.svd(R_T @ R_W.T)
+    if S[-1] <= 1e-6 * S[0]:                                         # R_T or R_W (nearly) singular
+        raise ValueError("stabilise needs item and user vectors of full rank e")
     M_T = R_W.T @ Vt.T / np.sqrt(S)                                  # T M_T = Q_T U S^(1/2)
     M_W = R_T.T @ U / np.sqrt(S)                                     # W M_W = Q_W V S^(1/2)
     if T0 is not None:

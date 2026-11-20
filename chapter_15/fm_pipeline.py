@@ -36,7 +36,10 @@ ranker's logit, fitted on the validation week's impressions; the arms differ onl
 
 The teacher is whichever of ways 2 and 3 has the lower validation log loss in its blend.
 Every model is fitted on what had arrived by day 16 to choose its epochs and blend, and
-refitted on day 23 for the test (Chapter 9's contract). The test is Chapter 9's honest
+refitted on day 23 for the test (Chapter 9's contract). Labels too are what had arrived:
+an impression and its satisfied play count only if their events reached the server by
+the cutoff (observed_rows), and a click is satisfied only by a completion or like of its
+own impression (satisfied_sequences). The three students train on 8 user rows per step. The test is Chapter 9's honest
 test: Chapter 8's production row with all its rules, checked; expected satisfied plays
 per row; paired differences against A with 95% intervals from 1,000 bootstrap draws of
 whole users; Chapter 5's guardrails; each app language; and each arm's compute per
@@ -73,7 +76,7 @@ from seq_data import (CHOICE, DAY, HITS, WORLDS, available_clicks, eligible_kept
                       training_sequences)
 from seq_models import SeqModel, score  # noqa: E402
 from seq_models import fit as fit9  # noqa: E402
-from pipeline_test import assemble_rows, features, first_allowed, heldout_rows, log_softmax_rows, new_candidates  # noqa: E402
+from pipeline_test import assemble_rows, features, first_allowed, log_softmax_rows, new_candidates  # noqa: E402
 from slate_data import rules, split, top_creators  # noqa: E402
 from ranking_data import LANGUAGES  # noqa: E402
 from filtering import RuleSets  # noqa: E402
@@ -148,6 +151,23 @@ class PairScorer(nn.Module):
         return self.head(torch.cat([h, v, h * v], -1)).squeeze(-1)
 
 
+def observed_rows(W, R, cutoff):
+    """The impressions of the requests R, as the server knew them at `cutoff`: a video of a
+    request counts if its viewable or click event had arrived by then, and it is satisfied
+    if a completion or like of that same impression had arrived by then. (Chapter 9's
+    heldout_rows reads every event, whenever it arrived.)"""
+    s, ev, items = W["served"], W["events"], W["items"]
+    arrived = (ev["impression_id"] >= 0) & (ev["server_time"] < cutoff)
+    seen = np.zeros(len(s["item_id"]), dtype=bool)
+    seen[ev["impression_id"][arrived & np.isin(ev["event"], ("viewable", "click"))]] = True
+    sat = np.zeros(len(s["item_id"]), dtype=bool)
+    sat[ev["impression_id"][arrived & np.isin(ev["event"], HITS)]] = True
+    req_row = np.full(int(s["request_id"].max()) + 1, -1)
+    req_row[R["request"]] = np.arange(len(R["request"]))
+    imp = np.flatnonzero(seen & ~items["is_product"][s["item_id"]] & np.isin(s["request_id"], R["request"]))
+    return req_row[s["request_id"][imp]], s["item_id"][imp], sat[imp].astype(float)
+
+
 class Requests:
     """Requests of days [start_day, end_day) for a downstream model: each request's history
     (the clicks the server had when it was served, as in Chapter 9's contract), its
@@ -161,7 +181,7 @@ class Requests:
     row, the moment a position predicts at is the earliest request that reads it, so a
     later request reading the same position sees the same output; the serving code
     (pair_scores) encodes every request on its own, at its own moment."""
-    def __init__(self, W, src, start_day, end_day, pools=None):
+    def __init__(self, W, src, start_day, end_day, cutoff, pools=None):
         R = requests(W, start_day, end_day)
         H, iv = histories(W, R)
         C = W["clicks"]
@@ -205,7 +225,7 @@ class Requests:
         self.rows = np.flatnonzero(self.req_row >= 0)                     # requests with a history
         self.where = np.full(len(R["user"]), -1)
         self.where[self.rows] = np.arange(len(self.rows))
-        r, c, y = heldout_rows(W, R, H, iv)
+        r, c, y = observed_rows(W, R, cutoff)
         keep = self.where[r] >= 0
         self.imp_req, self.imp_cand, self.y = r[keep], src.renum[c[keep]], y[keep]
         self.n_all, self.pos_all = len(y), int(y.sum())
@@ -282,7 +302,8 @@ def bce_epoch(model, data, opt, gen, teacher=None, kd="none", batch=64):
 def distill_over(student, teacher, valid, temp=KD_TEMP):
     """Listing 15.5. The KL divergence from the teacher's softened distribution over each
     request's candidates to the student's (Chapter 12's distill_loss, over a set of
-    candidates instead of every video); invalid candidates are left out of both."""
+    candidates instead of every video); invalid candidates are left out of both. Every row
+    must have at least one valid candidate (bce_epoch drops rows that have none)."""
     s = (student / temp).masked_fill(~valid, -math.inf)
     p = F.softmax((teacher / temp).masked_fill(~valid, -math.inf), dim=-1)
     logq = F.log_softmax(s, dim=-1).masked_fill(~valid, 0.0)
@@ -329,15 +350,17 @@ def bce_loss(model, data, batch=256):
     return total / len(data.y)
 
 
-def fit_pairs(model, train, valid, epochs, lr_seq=1e-3, lr_head=1e-3, teacher=None, kd="none", seed=0, patience=2):
-    """Adam on the downstream loss; with valid, the epoch with the lowest validation loss
-    is kept and training stops after `patience` epochs without a new best."""
+def fit_pairs(model, train, valid, epochs, lr_seq=1e-3, lr_head=1e-3, teacher=None, kd="none", seed=0, patience=2,
+              batch=64):
+    """Adam on the downstream loss, `batch` user rows per step; with valid, the epoch with
+    the lowest validation loss is kept and training stops after `patience` epochs without a
+    new best."""
     gen = torch.Generator().manual_seed(seed)
     opt = torch.optim.Adam([{"params": model.seq.parameters(), "lr": lr_seq},
                             {"params": model.head.parameters(), "lr": lr_head}])
     curve, best, state = [], math.inf, None
     for e in range(1, epochs + 1):
-        bce_epoch(model, train, opt, gen, teacher, kd, batch=8 if kd == "all" else 64)
+        bce_epoch(model, train, opt, gen, teacher, kd, batch=batch)
         if valid is None:
             continue
         v = bce_loss(model, valid)
@@ -354,20 +377,24 @@ def fit_pairs(model, train, valid, epochs, lr_seq=1e-3, lr_head=1e-3, teacher=No
 
 # ---------------------------------------------------------------- fine-tuning on satisfied plays
 def satisfied_sequences(W, cutoff):
-    """timed_sequences(W, cutoff), with a flag on each click that was satisfied (completed
-    or liked) by an event the server had received by the cutoff."""
+    """timed_sequences(W, cutoff), with a flag on each click that was satisfied: a
+    completion or like of the same impression (the same video in the same request) that
+    the server had received by the cutoff."""
     ev, C = W["events"], W["clicks"]
-    hit = np.isin(ev["event"], HITS) & (ev["item_id"] >= 0) & (ev["server_time"] < cutoff)
-    keys = set(zip(ev["session_id"][hit].tolist(), ev["item_id"][hit].tolist()))
+    hit = np.isin(ev["event"], HITS) & (ev["impression_id"] >= 0) & (ev["server_time"] < cutoff)
+    sat = np.zeros(len(W["served"]["item_id"]), dtype=bool)
+    sat[ev["impression_id"][hit]] = True
+    order = np.argsort(ev["event_id"])
+    imp = ev["impression_id"][order[np.searchsorted(ev["event_id"], C["event_id"], sorter=order)]]
     starts = np.searchsorted(C["user"], np.arange(len(W["users"]["vec"]) + 1))
-    seqs, times, sat = [], [], []
+    seqs, times, flags = [], [], []
     for u in range(len(W["users"]["vec"])):
         idx = available_clicks(C, starts[u], starts[u + 1], cutoff)
         if len(idx) >= 2:
             seqs.append(C["item"][idx])
             times.append(C["t"][idx])
-            sat.append(np.array([(s, i) in keys for s, i in zip(C["session"][idx].tolist(), C["item"][idx].tolist())]))
-    return seqs, times, sat
+            flags.append(sat[imp[idx]] & (imp[idx] >= 0))
+    return seqs, times, flags
 
 
 def satisfied_windows(src, seqs, times, sat, lo=-math.inf, hi=math.inf):
@@ -477,9 +504,9 @@ if __name__ == "__main__":
         return ranked_pools(sp, W, rs, uu)[:, :K][inv]
 
     sp16, sp23 = split(W, "validation"), split(W, "test")
-    tr16 = Requests(W, fm16, 0, 16, snapshot_pools(sp16, requests(W, 0, 16)))
-    va16 = Requests(W, fm16, 16, 23)
-    tr23 = Requests(W, fm23, 0, 23, snapshot_pools(sp23, requests(W, 0, 23)))
+    tr16 = Requests(W, fm16, 0, 16, 16 * DAY, snapshot_pools(sp16, requests(W, 0, 16)))
+    va16 = Requests(W, fm16, 16, 23, 23 * DAY)
+    tr23 = Requests(W, fm23, 0, 23, 23 * DAY, snapshot_pools(sp23, requests(W, 0, 23)))
     n_clicks16 = sum(len(s) for s in timed_sequences(W, 16 * DAY)[0])
     print(f"Downstream data: impressions before day 16 {tr16.n_all:,} ({tr16.pos_all:,} satisfied); days 16 to 23 "
           f"{va16.n_all:,} ({va16.pos_all:,} satisfied); before day 23 {tr23.n_all:,} ({tr23.pos_all:,} satisfied); "
@@ -539,7 +566,7 @@ if __name__ == "__main__":
     _, Tv = timed_histories(W, Rv)
     Rvd = day_requests(Rv)
     Hvd, Tvd = timed_histories(W, Rvd)
-    rows, cand, y = heldout_rows(W, Rv, Hv, ivv)
+    rows, cand, y = observed_rows(W, Rv, 23 * DAY)
     hp = score_pools(sp16["heavy"], sp16["S"], users, items, Rv["user"][rows], cand[:, None])[:, 0]
     wts, ll = {}, {}
 
@@ -565,11 +592,11 @@ if __name__ == "__main__":
 
     def student(kd):
         tab16 = None if kd == "none" else teacher_table((t_kind, models[t_label][0]), tr16, kd)
-        m16, c = fit_pairs(PairScorer(new_seq(fm16, *STUDENT)), tr16, va16, 20, teacher=tab16, kd=kd)
+        m16, c = fit_pairs(PairScorer(new_seq(fm16, *STUDENT)), tr16, va16, 20, teacher=tab16, kd=kd, batch=8)
         del tab16
         e = int(np.argmin(c)) + 1
         tab23 = None if kd == "none" else teacher_table((t_kind, models[t_label][1]), tr23, kd)
-        m23 = fit_pairs(PairScorer(new_seq(fm23, *STUDENT)), tr23, None, e, teacher=tab23, kd=kd)[0]
+        m23 = fit_pairs(PairScorer(new_seq(fm23, *STUDENT)), tr23, None, e, teacher=tab23, kd=kd, batch=8)[0]
         return m16, m23, c
 
     for label, kd in (("+ student", "none"), ("+ student, distilled, candidates", "candidates"),
@@ -599,6 +626,8 @@ if __name__ == "__main__":
         with torch.no_grad():
             f = flops(lambda: seq.encode(x, t, tn)) / 64
         seq.eval()
+        if label == "+ FM fine-tuned":
+            enc_flops = f
         print(f"  forward FLOPs of {'the foundation model' if label == '+ FM fine-tuned' else 'the student'}'s "
               f"layers over 50 clicks: {f:,.0f}")
     print(f"  teacher scores saved for the students before day 16: {len(tr16.rows):,} requests x {K} candidates = "
@@ -674,6 +703,27 @@ if __name__ == "__main__":
     print("Online by app language (arms in the order above):")
     for g in range(len(LANGUAGES)):
         print(f"  {LANGUAGES[g]} ({(lang == g).sum():,}): " + " ".join(f"{res[k][lang == g].mean():.4f}" for k in res))
+    print("Paired differences within each app language (95% interval, the language's users resampled):")
+    for g in range(len(LANGUAGES)):
+        mk = lang == g
+        cells = []
+        for a_ in ("+ FM subgraph", "+ FM fine-tuned", "+ student, distilled, all videos"):
+            m_, _, lo, hi = paired(res[a_][mk], res["+ Chapter 9's model"][mk], R["user"][mk])
+            cells.append(f"{a_} minus Chapter 9's model {m_:+.4f} [{lo:+.4f}, {hi:+.4f}]")
+        print(f"  {LANGUAGES[g]}: " + "; ".join(cells))
+    # the full cost of daily embeddings: the request's dot products plus the nightly batch
+    enc = []
+    for d in range(23, 30):
+        Hn, _ = timed_histories(W, {"user": W["consenting"], "time": np.full(len(W["consenting"]), d * DAY)})
+        enc.append(int((Hn >= 0).any(1).sum()))
+    came = len(np.unique(np.c_[R["user"], np.floor(R["time"] / DAY)][(H >= 0).any(1)], axis=0))
+    f_enc = enc_flops
+    per_req = f_enc * sum(enc) / len(R["user"])
+    print(f"Daily embeddings: the nightly batch encodes every consenting user with a history, {sum(enc):,} encodings "
+          f"over the test week's 7 nights (from {min(enc):,} to {max(enc):,} a night), for {len(R['user']):,} requests: "
+          f"{f_enc:,.0f} x {sum(enc):,} / {len(R['user']):,} = {per_req:,.0f} FLOPs per request, plus "
+          f"{cost['+ FM embeddings, daily']:,.0f} at the request; encoding only the users who made a request that "
+          f"day would take {came:,} encodings, {f_enc * came / len(R['user']):,.0f} FLOPs per request")
     print(f"(online: expected satisfied plays per row; against A: paired difference, standard error and 95% interval "
           f"from 1,000 bootstrap draws of whole users; coverage and top-10% cr.: Chapter 5's guardrails; FLOPs/request: "
           f"the second score's forward pass for one request with 50 earlier clicks at serving)  [{time.time() - t0:.0f} s]")
