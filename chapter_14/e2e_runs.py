@@ -595,8 +595,8 @@ if __name__ == "__main__":
             print(f"  {name:<46}{ndcg(top, rel):>8.4f}{play.sum(1).mean():>9.4f}{click.sum(1).mean():>8.3f}"
                   f"{bait:>7.1%}{nw:>7.1%}{cov:>8.1%}{conc:>8.1%}{d}", flush=True)
         print("  (NDCG@10: against the videos satisfied-played in each request, over requests with one; online: "
-              "expected satisfied plays per row; clicks: expected clicks per row; bait: share of slots with clickbait; "
-              "new: share of slots with a video uploaded on day 23; cover: share of the 3,480 videos shown at least "
+              "expected satisfied plays per row; clicks: expected clicks per row; bait: share of shown videos that are "
+              "clickbait; new: share of shown videos uploaded on day 23; cover: share of the 3,480 videos shown at least "
               "once; top10%: the top 10% of creators' share of position-weighted exposure)")
         print(f"\nChecks of every row ({len(users_q) * ROW:,} slots): banned videos shown (already clicked), "
               f"repeated videos, rows with more than {CAP} videos of one creator, empty slots")
