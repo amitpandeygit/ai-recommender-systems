@@ -1,0 +1,4022 @@
+{
+"listings": {
+"117": {
+"text": "heyrastaail aaeelaainar naakhoon 2026",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_2",
+"beauty_3",
+"beauty_4"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"155": {
+"text": "sastaa",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"cheap"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"183": {
+"text": "soop karee 2026 kek",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 0,
+"present": [
+"2026",
+"cooking_1",
+"cooking_2",
+"cooking_7"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"200": {
+"text": "budget naeaa mausam baarh",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"new",
+"news_1",
+"news_3",
+"news_4"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"216": {
+"text": "jhatpat chutkulaa meem",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_2",
+"comedy_7",
+"quick"
+],
+"faults": [
+"word dropped",
+"romanised Hindi"
+]
+},
+"246": {
+"text": "सीमित स्टॉक jhatpat wirodh pradorshan arthawyawasthaa baarh",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_2",
+"news_3",
+"news_5",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"259": {
+"text": "chaawal top raip gaanaa gaayk",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"cooking_3",
+"music_0",
+"music_5",
+"music_6",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"275": {
+"text": "riwyoo ruemiks laiptoop geming robot",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"music_8",
+"review",
+"tech_1",
+"tech_8",
+"tech_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"298": {
+"text": "intarawyoo jhatpat chunaaw mausam",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_0",
+"news_1",
+"news_8",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"wrong category"
+]
+},
+"303": {
+"text": "mekop maskaaraa sheph jhatpat",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_7",
+"home_8",
+"quick"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"typo"
+]
+},
+"410": {
+"text": "island top baajaar pahaar",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"top",
+"travel_1",
+"travel_5",
+"travel_7"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"424": {
+"text": "ball jhatpat tedee biyar yo-yo",
+"declared": 13,
+"language": 1,
+"kind": "product",
+"category": 13,
+"present": [
+"quick",
+"toys_3",
+"toys_4",
+"toys_9"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"455": {
+"text": "wijnaan swaasthya jhatpat traiphik",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_6",
+"news_7",
+"news_9",
+"quick"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"465": {
+"text": "धमाका ऑफर 100% ओरिजिनल sabse ahcchhaa mimikree meem majedaar paawar baink",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"best",
+"comedy_3",
+"comedy_7",
+"comedy_9",
+"phone_gear_3"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"471": {
+"text": "kaar maauat eeyrabads aasaan edaaptar",
+"declared": 8,
+"language": 1,
+"kind": "product",
+"category": 8,
+"present": [
+"easy",
+"phone_gear_2",
+"phone_gear_6",
+"phone_gear_7"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"474": {
+"text": "सीमित स्टॉक phooldaan deewaar gharee jhatpat lainp 100% ओरिजिनल",
+"declared": 12,
+"language": 1,
+"kind": "product",
+"category": 12,
+"present": [
+"home_0",
+"home_6",
+"home_9",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"480": {
+"text": "aaeelaainar riwyoo heyrastaail naakhoon",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_3",
+"beauty_4",
+"review"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"493": {
+"text": "geming jhatpat aip baitree",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"quick",
+"tech_4",
+"tech_6",
+"tech_8"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"528": {
+"text": "phes wosh chotee aaeelaainar nikhaar aasan",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_4",
+"beauty_6",
+"beauty_8",
+"easy",
+"skincare_3"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"wrong category"
+]
+},
+"537": {
+"text": "सीमित स्टॉक 100% ओरिजिनल skit nayaa mimicry staindaap",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_1",
+"comedy_5",
+"comedy_9",
+"new"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"552": {
+"text": "tren phon sastaa kaimraa anboksing",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"cheap",
+"tech_0",
+"tech_2",
+"tech_3",
+"travel_6"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"562": {
+"text": "सीमित स्टॉक geming aasaan phon laiptop 100% ओरिजिनल",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"easy",
+"tech_0",
+"tech_1",
+"tech_8"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"601": {
+"text": "raip daans gaanaa sabse achchhaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best",
+"music_0",
+"music_3",
+"music_5"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"625": {
+"text": "aaeelaainar heyrastaail nikhaar nayaa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_4",
+"beauty_6",
+"new"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"641": {
+"text": "paal patang gend sabse achchhaa",
+"declared": 13,
+"language": 1,
+"kind": "product",
+"category": 13,
+"present": [
+"best",
+"toys_1",
+"toys_3",
+"toys_5"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"656": {
+"text": "baarh 2026 wijnaan arthawyawasthaa",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"2026",
+"news_2",
+"news_3",
+"news_7"
+],
+"faults": [
+"romanised Hindi",
+"wrong category"
+]
+},
+"660": {
+"text": "mekap maskaaraa sastaa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_7",
+"cheap"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"typo"
+]
+},
+"672": {
+"text": "pairoiee sastaa kaartoon hansee",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"cheap",
+"comedy_4",
+"comedy_6",
+"comedy_8"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"673": {
+"text": "फ्री डिलीवरी gaanaa gitaar daans aasaan",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"easy",
+"music_0",
+"music_1",
+"music_3"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"693": {
+"text": "फ्री डिलीवरी sabse achchhaa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"best"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"701": {
+"text": "sabes achchhaa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"best"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"typo"
+]
+},
+"725": {
+"text": "sabse achchhaa baitree anboking geming सीमित स्टॉक",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_2",
+"tech_4",
+"tech_8"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"730": {
+"text": "lyrics dam piyaano riwyoo फ्री डिलीवरी धमाका ऑफर",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_4",
+"music_7",
+"music_9",
+"review"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo",
+"sales phrase",
+"wrong category"
+]
+},
+"736": {
+"text": "top",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"top"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"754": {
+"text": "baarh swaasthya review arthawyawasthaa",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_2",
+"news_3",
+"news_6",
+"review"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"834": {
+"text": "सीमित स्टॉक aasaan kaartoon staindaap meem",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_5",
+"comedy_7",
+"comedy_8",
+"easy"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"837": {
+"text": "bajat phon staind quick swaasthya barh",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_3",
+"news_4",
+"news_6",
+"phone_gear_4",
+"quick"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"842": {
+"text": "nikhaar lipastk aasaan mekap 100% ओरिजिनल",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_1",
+"beauty_6",
+"easy"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"900": {
+"text": "सीमित स्टॉक धमाका ऑफर aip anboksing asaan chaarjar",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"easy",
+"tech_2",
+"tech_6",
+"tech_7"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"919": {
+"text": "सीमित स्टॉक aaeelaainar naakhoon aasaan maskaaraa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_3",
+"beauty_4",
+"beauty_7",
+"easy"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"947": {
+"text": "anbosking jhatpat majedaar geming baitoee",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"comedy_3",
+"quick",
+"tech_2",
+"tech_4",
+"tech_8"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"959": {
+"text": "dram nyaa raip gaanaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_5",
+"music_7",
+"new"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"969": {
+"text": "riwyoo",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"review"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"981": {
+"text": "सेल सीमित स्टॉक phaaundeshan mekap aaeelaainar 2062",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_0",
+"beauty_4",
+"beauty_9"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"993": {
+"text": "100% ओरिजिनल chotee mekap heyrastaail jhatpat धमाका ऑफर",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_2",
+"beauty_8",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"1000": {
+"text": "फ्री डिलीवरी phlait pahaar shahar 2026 धमाका ऑफर",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"2026",
+"travel_1",
+"travel_2",
+"travel_4"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"1009": {
+"text": "सीमित स्टॉक jhatpat treiphik chunaaw wijnaan",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_0",
+"news_7",
+"news_9",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"1021": {
+"text": "teekhaa 2026 chaawal kek",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 0,
+"present": [
+"2026",
+"cooking_2",
+"cooking_3",
+"cooking_4"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1039": {
+"text": "gaayak top dram daans",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_3",
+"music_6",
+"music_7",
+"top"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1074": {
+"text": "paraphyoom lipastik riwyoo phaaundehan shart",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_1",
+"beauty_5",
+"beauty_9",
+"fashion_0",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"1097": {
+"text": "sastaa paraphyoom heyrastaail nikhaar सेल धमाका ऑफर",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_5",
+"beauty_6",
+"cheap"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"1109": {
+"text": "traiphik top interview baarh 100% ओरिजिनल",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_3",
+"news_8",
+"news_9",
+"top"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"1114": {
+"text": "meem staindaap sketch riwyoo",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_1",
+"comedy_5",
+"comedy_7",
+"review"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"1132": {
+"text": "raip top dram gaayak",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_5",
+"music_6",
+"music_7",
+"top"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1149": {
+"text": "baasketbol nayaa phitnes abhyaas",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"new",
+"sport_3",
+"sport_5",
+"sport_8"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1173": {
+"text": "nayaa chutkulaa majedaar pairodee",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_2",
+"comedy_3",
+"comedy_4",
+"new"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1185": {
+"text": "सेल meeem teekhaa pairodee aasaan staindaap",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_4",
+"comedy_5",
+"comedy_7",
+"cooking_4",
+"easy"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"1202": {
+"text": "chootee 2026 heyrastaial nikhaar",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_2",
+"beauty_6",
+"beauty_8"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"wrong category"
+]
+},
+"1209": {
+"text": "100% ओरिजिनल samudra tat riywoo waterfall",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"review",
+"travel_0",
+"travel_9"
+],
+"faults": [
+"word dropped",
+"English mixed",
+"romanised Hindi",
+"typo",
+"sales phrase",
+"wrong category"
+]
+},
+"1387": {
+"text": "baitree robot riwyoo phon",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"review",
+"tech_0",
+"tech_4",
+"tech_9"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1418": {
+"text": "फ्री डिलीवरी सीमित स्टॉक piyaao konsart jhotpat dram",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_2",
+"music_4",
+"music_7",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"1422": {
+"text": "फ्री डिलीवरी सेल konsart dram aasaan gaayak",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"easy",
+"music_2",
+"music_6",
+"music_7"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"1446": {
+"text": "kreyon top tedee biyar",
+"declared": 13,
+"language": 1,
+"kind": "product",
+"category": 13,
+"present": [
+"top",
+"toys_4",
+"toys_7"
+],
+"faults": [
+"word dropped",
+"romanised Hindi"
+]
+},
+"1455": {
+"text": "kaartoon pairodee mimikree sabse achchhaa",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"best",
+"comedy_4",
+"comedy_8",
+"comedy_9"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1478": {
+"text": "sastaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"cheap"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"1484": {
+"text": "kaartoon majedaar aasaan meem",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_3",
+"comedy_7",
+"comedy_8",
+"easy"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1533": {
+"text": "riwyoo muokebaajee baasketbol daur",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"review",
+"sport_4",
+"sport_5",
+"sport_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"1609": {
+"text": "baarh swaasthya traiphik 2026",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"2026",
+"news_3",
+"news_6",
+"news_9"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1617": {
+"text": "फ्री डिलीवरी gaijet sastaa baitree geming सीमित स्टॉक",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"cheap",
+"tech_4",
+"tech_5",
+"tech_8"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"1679": {
+"text": "gaanaa raip sabse achchhaa daans",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best",
+"music_0",
+"music_3",
+"music_5"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1712": {
+"text": "laiptop sabse achchhaa geming gaijet",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_1",
+"tech_5",
+"tech_8"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1723": {
+"text": "phaaundeshan sastaa maskaaraa naakhoon",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_3",
+"beauty_7",
+"beauty_9",
+"cheap"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"1743": {
+"text": "sabse achchhaa",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"best"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"1794": {
+"text": "robot 2026 phon aip",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"2026",
+"tech_0",
+"tech_6",
+"tech_9"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"1847": {
+"text": "majedaar kaartoon 2026 chutkkulaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"2026",
+"comedy_2",
+"comedy_3",
+"comedy_8"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"wrong category"
+]
+},
+"1867": {
+"text": "karee resipee soop 2026",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 0,
+"present": [
+"2026",
+"cooking_0",
+"cooking_1",
+"cooking_7"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"wrong category"
+]
+},
+"1877": {
+"text": "pairodee nayaa kaartoon",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_4",
+"comedy_8",
+"new"
+],
+"faults": [
+"word dropped",
+"romanised Hindi"
+]
+},
+"1919": {
+"text": "धमाका ऑफर shelph sabse achchhaa pairodee hansee staindaap",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"best",
+"comedy_4",
+"comedy_5",
+"comedy_6",
+"home_8"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"1964": {
+"text": "jhatpat baitere geming hotal phon",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"quick",
+"tech_0",
+"tech_4",
+"tech_8",
+"travel_3"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"1981": {
+"text": "सीमित स्टॉक sastaa daans bol gaayak",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"cheap",
+"music_3",
+"music_6",
+"music_9"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"1985": {
+"text": "100% ओरिजिनल सीमित स्टॉक staindaap sastaaa majedaar praink",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"cheap",
+"comedy_0",
+"comedy_3",
+"comedy_5"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"1989": {
+"text": "nayaa gaijet kaimraa aip",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"new",
+"tech_3",
+"tech_5",
+"tech_6"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2025": {
+"text": "jhatpat smaartawoch perfume nikhaar phaaundeshan",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_5",
+"beauty_6",
+"beauty_9",
+"phone_gear_9",
+"quick"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"2041": {
+"text": "सीमित स्टॉक swaasthya intarawyoo weather top",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_1",
+"news_6",
+"news_8",
+"top"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2048": {
+"text": "सीमित स्टॉक laiptop gaijet aip riwyoo सेल",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"review",
+"tech_1",
+"tech_5",
+"tech_6"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2077": {
+"text": "top",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"top"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"typo"
+]
+},
+"2090": {
+"text": "gaanaa asaaan daans concert eeyrabads",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"easy",
+"music_0",
+"music_2",
+"music_3",
+"phone_gear_2"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"2093": {
+"text": "धमाका ऑफर arthawyawasthaa chunaaw baarh top",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_0",
+"news_2",
+"news_3",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"2101": {
+"text": "aaeelaainar heyrastaail nayaa tonar chotee",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_4",
+"beauty_8",
+"new",
+"skincare_4"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2109": {
+"text": "aaeelaainar nikhaar jhatpat perfume",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_4",
+"beauty_5",
+"beauty_6",
+"quick"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"2117": {
+"text": "धमाका ऑफर meem staindaap jhatpat",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_5",
+"comedy_7",
+"quick"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2131": {
+"text": "bol piyaano pardaa top gaayak सीमित स्टॉक",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"home_2",
+"music_4",
+"music_6",
+"music_9",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2154": {
+"text": "100% ओरिजिनल फ्री डिलीवरी hotal mandir daur jharnaa",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"sport_4",
+"travel_3",
+"travel_8",
+"travel_9"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2157": {
+"text": "jhatpat paraphyoom heyrastaiil caotee",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_5",
+"beauty_8",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2166": {
+"text": "फ्री डिलीवरी dweop phlaait pahaar riwyoo",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"review",
+"travel_1",
+"travel_4",
+"travel_5"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase",
+"wrong category"
+]
+},
+"2167": {
+"text": "सेल saabun phes wosh phes maask riwyoo",
+"declared": 11,
+"language": 1,
+"kind": "product",
+"category": 11,
+"present": [
+"review",
+"skincare_3",
+"skincare_6",
+"skincare_7"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2175": {
+"text": "kaimraa anboksing phon sabse achchhaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_0",
+"tech_2",
+"tech_3"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2183": {
+"text": "gitaar riwyoo gaanaa daans",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_1",
+"music_3",
+"review"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2190": {
+"text": "mandir aasaan juarnaa hotel",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"easy",
+"travel_3",
+"travel_8",
+"travel_9"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"2199": {
+"text": "gol aasaan kriket mukkebaajee",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"easy",
+"sport_1",
+"sport_2",
+"sport_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2218": {
+"text": "nayaa pairodee chutkulaa majedaar",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_2",
+"comedy_3",
+"comedy_4",
+"new"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2221": {
+"text": "aasaan heyrastaail mekap",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_2",
+"easy"
+],
+"faults": [
+"word dropped",
+"romanised Hindi"
+]
+},
+"2226": {
+"text": "chaarjar kaimraa sastaa aip",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"cheap",
+"tech_3",
+"tech_6",
+"tech_7"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2229": {
+"text": "riwyoo daans gaanaa duam सीमित स्टॉक",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_3",
+"music_7",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase",
+"wrong category"
+]
+},
+"2233": {
+"text": "2206",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"typo"
+]
+},
+"2234": {
+"text": "sabse achchhaa baitree phon caarjar",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_0",
+"tech_4",
+"tech_7"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2268": {
+"text": "धमाका ऑफर aaeenaa naaya takiyaa phooldaan सीमित स्टॉक",
+"declared": 12,
+"language": 1,
+"kind": "product",
+"category": 12,
+"present": [
+"home_1",
+"home_5",
+"home_9",
+"new"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"2274": {
+"text": "2026",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"2026"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"2299": {
+"text": "सेल gol kriket haailaaits niyaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"new",
+"sport_1",
+"sport_2",
+"sport_7"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase",
+"wrong category"
+]
+},
+"2319": {
+"text": "daur abhyaas pihtnes riwyoo फ्री डिलीवरी",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"review",
+"sport_3",
+"sport_4",
+"sport_8"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"2320": {
+"text": "rwiyoo",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"review"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"typo"
+]
+},
+"2327": {
+"text": "baitree robet sabse achchhaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_4",
+"tech_9"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"typo"
+]
+},
+"2328": {
+"text": "phone baitree riwyoo aip",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"review",
+"tech_0",
+"tech_4",
+"tech_6"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"2337": {
+"text": "phon jhatpat baitree gaijet",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"quick",
+"tech_0",
+"tech_4",
+"tech_5"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2350": {
+"text": "2026 gaijet phon geming",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"2026",
+"tech_0",
+"tech_5",
+"tech_8"
+],
+"faults": [
+"romanised Hindi",
+"wrong category"
+]
+},
+"2360": {
+"text": "sanaskreen majedaar nayaa meem praink",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_0",
+"comedy_3",
+"comedy_7",
+"new",
+"skincare_2"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2373": {
+"text": "सेल धमाका ऑफर robot geming gaijet riwyo",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"review",
+"tech_5",
+"tech_8",
+"tech_9"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"2377": {
+"text": "सीमित स्टॉक mkeap riwyoo naakhoon maskaaraa 100% ओरिजिनल",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_3",
+"beauty_7",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"2391": {
+"text": "lipastik eyeliner paraphyoom सेल धमाका ऑफर",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_1",
+"beauty_4",
+"beauty_5"
+],
+"faults": [
+"word dropped",
+"English mixed",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2437": {
+"text": "फ्री डिलीवरी धमाका ऑफर dram reemiks riwyoo raip",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_5",
+"music_7",
+"music_8",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2456": {
+"text": "फ्री डिलीवरी paraphyoom aaeelaainar heyrastaail riwyoo 100% ओरिजिनल",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_4",
+"beauty_5",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2489": {
+"text": "dram bol gaanaa",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_7",
+"music_9"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"wrong category"
+]
+},
+"2510": {
+"text": "100% ओरिजिनल wirodh pradarshan arthawyawasthaa 2026 kaar maaunt swaasthya सेल",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"2026",
+"news_2",
+"news_5",
+"news_6",
+"phone_gear_6"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"2580": {
+"text": "2026 geming chaarjar camera",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"2026",
+"tech_3",
+"tech_7",
+"tech_8"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"2593": {
+"text": "baasketbol nayaa daur kanbal maich",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"home_7",
+"new",
+"sport_4",
+"sport_5",
+"sport_6"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2606": {
+"text": "sastaa arthawyawasthaa bajat electoon",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"cheap",
+"news_0",
+"news_2",
+"news_4"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"2619": {
+"text": "pajal kreyon sabse achchhaa teee biyar",
+"declared": 13,
+"language": 1,
+"kind": "product",
+"category": 13,
+"present": [
+"best",
+"toys_1",
+"toys_4",
+"toys_7"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2660": {
+"text": "top phaaundeshan niikhaar naakhoon",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_3",
+"beauty_6",
+"beauty_9",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2670": {
+"text": "dareee aaeenaa top kanbal",
+"declared": 12,
+"language": 1,
+"kind": "product",
+"category": 12,
+"present": [
+"home_3",
+"home_5",
+"home_7",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2698": {
+"text": "mekap maskaaraa 2026 lipastik",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_0",
+"beauty_1",
+"beauty_7"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2716": {
+"text": "aip reemiks riwyyoo gaanaa bol",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_8",
+"music_9",
+"review",
+"tech_6"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2746": {
+"text": "riwyoo",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"review"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"2753": {
+"text": "सीमित स्टॉक baajaar riwyoo phlaait shahar",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"review",
+"travel_2",
+"travel_4",
+"travel_7"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"2801": {
+"text": "2026 maskaaraa hairstyle phaaundeshan",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_2",
+"beauty_7",
+"beauty_9"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"wrong category"
+]
+},
+"2812": {
+"text": "aip geming anboksing sabse achchhaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_2",
+"tech_6",
+"tech_8"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"2822": {
+"text": "mekap 2062 robot baitree geming",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"2026",
+"beauty_0",
+"tech_4",
+"tech_8",
+"tech_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2856": {
+"text": "arthawyawasthaa riwyooo intarawyoo baarh",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_2",
+"news_3",
+"news_8",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2896": {
+"text": "drums reemiks gaanaa sastaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"cheap",
+"music_0",
+"music_7",
+"music_8"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"2934": {
+"text": "sastaaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"cheap"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"typo"
+]
+},
+"2947": {
+"text": "mekap nikhaar heyrastaail 2206 sanaskreen",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_0",
+"beauty_2",
+"beauty_6",
+"skincare_2"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"2952": {
+"text": "swaasthya nayaa intarawyoo arthawyawasthaa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"new",
+"news_2",
+"news_6",
+"news_8"
+],
+"faults": [
+"romanised Hindi",
+"wrong category"
+]
+},
+"2971": {
+"text": "फ्री डिलीवरी सीमित स्टॉक mekap paraphyoom naakhoon 2062",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_0",
+"beauty_3",
+"beauty_5"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"2995": {
+"text": "nayaa nikhaar aaeelaainar heyrastaail",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_4",
+"beauty_6",
+"new"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3070": {
+"text": "laiptop robot baitree miksar",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"kitchen_2",
+"tech_1",
+"tech_4",
+"tech_9"
+],
+"faults": [
+"word dropped",
+"romanised Hindi"
+]
+},
+"3081": {
+"text": "सेल traffic mausam swaastoya sastaa सीमित स्टॉक",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"cheap",
+"news_1",
+"news_6",
+"news_9"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"3089": {
+"text": "reemiks piyaano 20a6 gaayak daree",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"2026",
+"home_3",
+"music_4",
+"music_6",
+"music_8"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"3112": {
+"text": "aaeelaainar jhatpat chotee maskaaraa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_4",
+"beauty_7",
+"beauty_8",
+"quick"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3135": {
+"text": "nayaa dram daans",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_3",
+"music_7",
+"new"
+],
+"faults": [
+"word dropped",
+"romanised Hindi"
+]
+},
+"3137": {
+"text": "सीमित स्टॉक kek teekhaa soop सेल",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 0,
+"present": [
+"cooking_2",
+"cooking_4",
+"cooking_7"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"3139": {
+"text": "2026 phaaundeshan heyrasaail naakhoon",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_2",
+"beauty_3",
+"beauty_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"3150": {
+"text": "20226 pairodee staindaap prank धमाका ऑफर",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"2026",
+"comedy_0",
+"comedy_4",
+"comedy_5"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo",
+"sales phrase",
+"wrong category"
+]
+},
+"3168": {
+"text": "yo-yo pajal guriyaa raip aasain",
+"declared": 13,
+"language": 1,
+"kind": "product",
+"category": 13,
+"present": [
+"easy",
+"music_5",
+"toys_0",
+"toys_1",
+"toys_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"3195": {
+"text": "riwyoo",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"review"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"wrong category"
+]
+},
+"3216": {
+"text": "meme phaaundeshan heyrastaail nikhaar 2026 सेल सीमित स्टॉक",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_2",
+"beauty_6",
+"beauty_9",
+"comedy_7"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"3329": {
+"text": "gaayak gaanaa raip 2026",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"2026",
+"music_0",
+"music_5",
+"music_6"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3330": {
+"text": "rip sastaa gaeyak gaanaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"cheap",
+"music_0",
+"music_5",
+"music_6"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"3364": {
+"text": "धमाका ऑफर chaarjar aip robot sabse achchhaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_6",
+"tech_7",
+"tech_9"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"3399": {
+"text": "kaartoon kek meem top chutkulaa",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_2",
+"comedy_7",
+"comedy_8",
+"cooking_2",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"wrong category"
+]
+},
+"3410": {
+"text": "meem staindaap mimikree aasaan",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_5",
+"comedy_7",
+"comedy_9",
+"easy"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3440": {
+"text": "sabse achchhaa chutkulaa staindaap meme",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"best",
+"comedy_2",
+"comedy_5",
+"comedy_7"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"3443": {
+"text": "phaaundeshan naakhoon riwyoo aaeelaainar",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_3",
+"beauty_4",
+"beauty_9",
+"review"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3446": {
+"text": "kartoon kanbla skit 2206 staindaap 100% ओरिजिनल",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"2026",
+"comedy_1",
+"comedy_5",
+"comedy_8",
+"home_7"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"3448": {
+"text": "heyrastaail phaaundeshan naakhoon best",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_3",
+"beauty_9",
+"best"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"3457": {
+"text": "धमाका ऑफर wirodh pradarshan chunaaw nayaa mausam 100% ओरिजिनल",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"new",
+"news_0",
+"news_1",
+"news_5"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"3476": {
+"text": "phone geming sabse achchhaa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"best",
+"tech_0",
+"tech_8"
+],
+"faults": [
+"word dropped",
+"English mixed",
+"romanised Hindi"
+]
+},
+"3479": {
+"text": "nayaa chunaaw science",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"new",
+"news_0",
+"news_7"
+],
+"faults": [
+"word dropped",
+"English mixed",
+"romanised Hindi"
+]
+},
+"3497": {
+"text": "sabse achchhaa dram daans gaayak 100% ओरिजिनल फ्री डिलीवरी",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best",
+"music_3",
+"music_6",
+"music_7"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"3498": {
+"text": "makeup paraphyoom maskaaraa sabse achchhaa",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_5",
+"beauty_7",
+"best"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"wrong category"
+]
+},
+"3500": {
+"text": "sabse achchhaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"3535": {
+"text": "daans sabse achchhaa konsart gaanaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best",
+"music_0",
+"music_2",
+"music_3"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3536": {
+"text": "धमाका ऑफर chotee phaaundeshan riwyoo aaeelaainar",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_4",
+"beauty_8",
+"beauty_9",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"3542": {
+"text": "top maskaaraa heyrastaail",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_7",
+"top"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"wrong category"
+]
+},
+"3547": {
+"text": "jhatpat naashtaa teekhaa chaawal",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 0,
+"present": [
+"cooking_3",
+"cooking_4",
+"cooking_5",
+"quick"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3550": {
+"text": "kaimraa jhatpat geming laiptop",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"quick",
+"tech_1",
+"tech_3",
+"tech_8"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3604": {
+"text": "maskaaraa heyrastaail mekap aasaan",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_2",
+"beauty_7",
+"easy"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3653": {
+"text": "gitaaar sabse achchhaa daans bol",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best",
+"music_1",
+"music_3",
+"music_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"3683": {
+"text": "jhatpat bol sonng gaayak",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_6",
+"music_9",
+"quick"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"3723": {
+"text": "top",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"top"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"wrong category"
+]
+},
+"3734": {
+"text": "jhatpat konsart gitaar gaanaa सेल धमाका ऑफर",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_1",
+"music_2",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"3744": {
+"text": "phon kaawr kebal speekar jhatpat",
+"declared": 8,
+"language": 1,
+"kind": "product",
+"category": 8,
+"present": [
+"phone_gear_0",
+"phone_gear_1",
+"phone_gear_8",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"3764": {
+"text": "kreyon 2026 dweep jharnaa samudra tat",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"2026",
+"toys_7",
+"travel_0",
+"travel_5",
+"travel_9"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3772": {
+"text": "heyrastaail chotee parapyhoom",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_5",
+"beauty_8"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"typo"
+]
+},
+"3787": {
+"text": "gitaar jhatpat rapi reemiks",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_1",
+"music_5",
+"music_8",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"3815": {
+"text": "100% ओरिजिनल सेल naakhoon nikhaar heyrastaail aasaan",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_3",
+"beauty_6",
+"easy"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"3912": {
+"text": "सेल tonar reemiks daans dram 2026",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"2026",
+"music_3",
+"music_7",
+"music_8",
+"skincare_4"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"3915": {
+"text": "nayaa mekap paraphyoom aaeenaa chotee",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_5",
+"beauty_8",
+"home_5",
+"new"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3919": {
+"text": "dweep flight aaaan samudra tat",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 4,
+"present": [
+"easy",
+"travel_0",
+"travel_4",
+"travel_5"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"3972": {
+"text": "traiphik wirodh pradarshan top wijnaan",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_5",
+"news_7",
+"news_9",
+"top"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"3977": {
+"text": "jhatpat kaartoon pairodee mimikoee",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_4",
+"comedy_8",
+"comedy_9",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4011": {
+"text": "फ्री डिलीवरी 100% ओरिजिनल gaijet nayia phhon",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"new",
+"tech_0",
+"tech_5"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"4026": {
+"text": "quick gaijet kaimraa anboksing 100% ओरिजिनल",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"quick",
+"tech_2",
+"tech_3",
+"tech_5"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"4032": {
+"text": "riwyoo",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"review"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"4049": {
+"text": "सीमित स्टॉक gaijet heyrastaail phaaundeshan top mekpa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_2",
+"beauty_9",
+"tech_5",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"4054": {
+"text": "heyrastaail maskaaraa aasaan aaeelaainar",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_4",
+"beauty_7",
+"easy"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4061": {
+"text": "naashtaa gril aasaan mithaaee",
+"declared": 0,
+"language": 1,
+"kind": "video",
+"category": 0,
+"present": [
+"cooking_5",
+"cooking_8",
+"cooking_9",
+"easy"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4099": {
+"text": "kriket phitnes abhyaas jahtpat",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"quick",
+"sport_1",
+"sport_3",
+"sport_8"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4129": {
+"text": "sabse achchhaa",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"best"
+],
+"faults": [
+"says nothing",
+"romanised Hindi",
+"typo"
+]
+},
+"4174": {
+"text": "gol daur baasketbol top",
+"declared": 4,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"sport_2",
+"sport_4",
+"sport_5",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"wrong category"
+]
+},
+"4175": {
+"text": "grial mithaaee karee",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 0,
+"present": [
+"cooking_1",
+"cooking_8",
+"cooking_9"
+],
+"faults": [
+"word dropped",
+"English mixed",
+"romanised Hindi",
+"typo",
+"wrong category"
+]
+},
+"4191": {
+"text": "jhatpat baitree anboksing laipotp",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"quick",
+"tech_1",
+"tech_2",
+"tech_4"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4208": {
+"text": "konsart daasn sabse achchhaa gaayak",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best",
+"music_2",
+"music_3",
+"music_6"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"wrong category"
+]
+},
+"4210": {
+"text": "20226 mekap paraphyoom phaaundeshan",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"2026",
+"beauty_0",
+"beauty_5",
+"beauty_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4262": {
+"text": "धमाका ऑफर सीमित स्टॉक phaaundeshan paraphyoom top naakhoon",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_3",
+"beauty_5",
+"beauty_9",
+"top"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"4265": {
+"text": "riwyoo",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 3,
+"present": [
+"review"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"4308": {
+"text": "sabse achchhaa",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"best"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"4354": {
+"text": "mukkebaajee baioree geming riwyoo robot",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"review",
+"sport_9",
+"tech_4",
+"tech_8",
+"tech_9"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4384": {
+"text": "gaanaa arthawyawasthaa raip konsart 2026 धमाका ऑफर 100% ओरिजिनल",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"2026",
+"music_0",
+"music_2",
+"music_5",
+"news_2"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"4400": {
+"text": "gaanaa daans nayaa gitaar",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_1",
+"music_3",
+"new"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4412": {
+"text": "riwyoo bol gaanaa धमाका ऑफर",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_9",
+"review"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"sales phrase"
+]
+},
+"4431": {
+"text": "pairodee hansee prank sabse achchhaa",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"best",
+"comedy_0",
+"comedy_4",
+"comedy_6"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"4434": {
+"text": "baarh 2026 traiphik bajat सेल",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"2026",
+"news_3",
+"news_4",
+"news_9"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"4454": {
+"text": "धमाका ऑफर gaanaa raip dans saabun aasaan सीमित स्टॉक",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"easy",
+"music_0",
+"music_3",
+"music_5",
+"skincare_7"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"4459": {
+"text": "miikree majedaar sastaa",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"cheap",
+"comedy_3",
+"comedy_9"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"typo"
+]
+},
+"4475": {
+"text": "swaasthya baarh sabse achchhaa wijnaan",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"best",
+"news_3",
+"news_6",
+"news_7"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4499": {
+"text": "100% ओरिजिनल staindaap mimikree nayaa ketlee kaaroon सेल",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_5",
+"comedy_8",
+"comedy_9",
+"kitchen_3",
+"new"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"4556": {
+"text": "sabse achchhaa",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"best"
+],
+"faults": [
+"says nothing",
+"romanised Hindi"
+]
+},
+"4579": {
+"text": "100% ओरिजिनल sastaa kaartoon chutkulua praink सीमित स्टॉक",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"cheap",
+"comedy_0",
+"comedy_2",
+"comedy_8"
+],
+"faults": [
+"romanised Hindi",
+"typo",
+"sales phrase"
+]
+},
+"4594": {
+"text": "maskaaraa sabse achchhaa parahyoom chotee",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_5",
+"beauty_7",
+"beauty_8",
+"best"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4616": {
+"text": "smaartawoch sastaa haailaaits edaaptar kebal",
+"declared": 8,
+"language": 1,
+"kind": "product",
+"category": 8,
+"present": [
+"cheap",
+"phone_gear_1",
+"phone_gear_7",
+"phone_gear_9",
+"sport_7"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4665": {
+"text": "फ्री डिलीवरी chutkulaa staindaap riwyoo pairodee सीमित स्टॉक",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_2",
+"comedy_4",
+"comedy_5",
+"review"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"4683": {
+"text": "धमाका ऑफर phaaundeshan nayaa paraphyoom chotee 100% ओरिजिनल",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_5",
+"beauty_8",
+"beauty_9",
+"new"
+],
+"faults": [
+"romanised Hindi",
+"sales phrase"
+]
+},
+"4697": {
+"text": "wirodh pradarshan sabse achchaa bajat intarawyoo",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"best",
+"news_4",
+"news_5",
+"news_8"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4711": {
+"text": "song gitaar sabse achchhaa gaayak niodals",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"best",
+"cooking_6",
+"music_0",
+"music_1",
+"music_6"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"4722": {
+"text": "baitree saastaa aip kaimraa",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"cheap",
+"tech_3",
+"tech_4",
+"tech_6"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4748": {
+"text": "pairodee skit jhatpat staindaap",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"comedy_1",
+"comedy_4",
+"comedy_5",
+"quick"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4779": {
+"text": "naakhoon paraphyoom aasaan phes wosh maskaaraa",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_3",
+"beauty_5",
+"beauty_7",
+"easy",
+"skincare_3"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4832": {
+"text": "धमाका ऑफर 100% ओरिजिनल heyrastaail naakhoon aaeelaainar",
+"declared": 3,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_2",
+"beauty_3",
+"beauty_4"
+],
+"faults": [
+"word dropped",
+"romanised Hindi",
+"sales phrase",
+"wrong category"
+]
+},
+"4869": {
+"text": "wijnaan 2026 swaasthya intarawyoo",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"2026",
+"news_6",
+"news_7",
+"news_8"
+],
+"faults": [
+"romanised Hindi",
+"wrong category"
+]
+},
+"4883": {
+"text": "skit sastaa chutkulaa hansee",
+"declared": 2,
+"language": 1,
+"kind": "video",
+"category": 2,
+"present": [
+"cheap",
+"comedy_1",
+"comedy_2",
+"comedy_6"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4886": {
+"text": "review chunaaw wirodh pradarshan traiphik",
+"declared": 7,
+"language": 1,
+"kind": "video",
+"category": 7,
+"present": [
+"news_0",
+"news_5",
+"news_9",
+"review"
+],
+"faults": [
+"English mixed",
+"romanised Hindi"
+]
+},
+"4892": {
+"text": "bol drram nayaa gaanaa",
+"declared": 1,
+"language": 1,
+"kind": "video",
+"category": 1,
+"present": [
+"music_0",
+"music_7",
+"music_9",
+"new"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4910": {
+"text": "geming liptop chargeer top",
+"declared": 5,
+"language": 1,
+"kind": "video",
+"category": 5,
+"present": [
+"tech_1",
+"tech_7",
+"tech_8",
+"top"
+],
+"faults": [
+"English mixed",
+"romanised Hindi",
+"typo"
+]
+},
+"4927": {
+"text": "lipastik nikhaar jhatpat heyrastaail",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_1",
+"beauty_2",
+"beauty_6",
+"quick"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4941": {
+"text": "phaaundeshan maskaaraa nayaa mekap",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_7",
+"beauty_9",
+"new"
+],
+"faults": [
+"romanised Hindi"
+]
+},
+"4965": {
+"text": "nikhaar phaaundeeshan nayaa mekap",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_0",
+"beauty_6",
+"beauty_9",
+"new"
+],
+"faults": [
+"romanised Hindi",
+"typo"
+]
+},
+"4998": {
+"text": "bloks chotee aaeelaainar naakhoon top",
+"declared": 6,
+"language": 1,
+"kind": "video",
+"category": 6,
+"present": [
+"beauty_3",
+"beauty_4",
+"beauty_8",
+"top",
+"toys_2"
+],
+"faults": [
+"romanised Hindi"
+]
+}
+}
+}

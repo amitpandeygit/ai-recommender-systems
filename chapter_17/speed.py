@@ -70,8 +70,8 @@ if __name__ == "__main__":
     alone, fallback = requests(L, ids)
     print(f"{len(alone)} listings sent alone and {len(fallback)} sent with the dictionary's findings; "
           f"{llm.engine_version(LOCAL[0])}; greedy decoding with the schema's grammar")
-    print(f"  {'':<14}{'load s':>8}{'first s':>9}{'alone: median s':>17}{'out tokens':>12}"
-          f"{'with dictionary: median s':>27}{'out tokens':>12}{'requests':>10}")
+    print(f"  {'':<14}{'load s':>8}{'first s':>9}{'alone: median s':>17}{'mean s':>8}{'out tokens':>12}"
+          f"{'with dictionary: median s':>27}{'mean s':>8}{'out tokens':>12}{'requests':>10}")
     for name in LOCAL:
         t = time.time()
         llm._local(name)
@@ -79,9 +79,10 @@ if __name__ == "__main__":
         a = timed(name, "speed_alone", alone, 96)
         f = timed(name, "speed_fallback", fallback, 48)
         print(f"  {name:<14}{load:>8.1f}{a[0][0]:>9.1f}{np.median([x[0] for x in a[1:]]):>17.2f}"
-              f"{np.mean([x[2] for x in a]):>12.1f}{np.median([x[0] for x in f[1:]]):>27.2f}"
+              f"{np.mean([x[0] for x in a[1:]]):>8.2f}{np.mean([x[2] for x in a]):>12.1f}"
+              f"{np.median([x[0] for x in f[1:]]):>27.2f}{np.mean([x[0] for x in f[1:]]):>8.2f}"
               f"{np.mean([x[2] for x in f]):>12.1f}{len(a):>6}{len(f):>4}", flush=True)
         llm._loaded.clear()
     print("  first: the first request alone, which also reads the shared instruction; median: the other "
           "requests, which restore the saved state and read only their own part (the first request with the "
-          "dictionary's findings, which reads that instruction, is left out of its median)")
+          "dictionary's findings, which reads that instruction, is left out of its median and mean)")

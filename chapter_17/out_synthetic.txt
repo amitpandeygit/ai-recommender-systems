@@ -1,20 +1,22 @@
 Environment: Python 3.13.18, NumPy 2.5.4, PyTorch 2.15.0, Linux x86_64, 2 CPUs
 Columns: real test-week buyers among a product's 3 synthetic buyers (mean), NDCG@10, recall@10, and the paired difference in NDCG@10 against no synthetic buyers
 
-chapter3: 978 users bought a launched product in days 23 to 30. Candidates per product: 12; synthetic buyers per product: 3. Model Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f): 150 requests, 434 input and 20.6 output tokens each, 39 minutes  [91 s]
+chapter3: 978 users bought a launched product in days 23 to 30. Candidates per product: 12; synthetic buyers per product: 3. Model Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f): 150 requests, 434 input and 20.6 output tokens each, 39 minutes  [97 s]
   products with a real test-week buyer among their 12 candidates: 1.3%
-  no synthetic buyers          0.000   0.0389     0.0796     [179 s]
-  content filter               0.000   0.0333     0.0685   -0.0056 (0.0033) [-0.0124, +0.0004]  [267 s]
-  LLM shoppers                 0.000   0.0337     0.0674   -0.0053 (0.0033) [-0.0119, +0.0009]  [355 s]
-  hidden taste (reference)     0.013   0.0320     0.0647   -0.0069 (0.0033) [-0.0136, -0.0009]  [443 s]
-  hidden taste, any shopper    0.047   0.0459     0.0850   +0.0070 (0.0040) [-0.0010, +0.0152]  [531 s]
+  LLM shoppers: 0 answers cut off, 0 not matching the schema; 0 products got fewer than 3 distinct buyers (the model named a shopper twice)
+  no synthetic buyers            0.000   0.0389     0.0796     [186 s]
+  content filter                 0.000   0.0333     0.0685   -0.0056 (0.0033) [-0.0124, +0.0004]  [272 s]
+  LLM shoppers                   0.000   0.0337     0.0674   -0.0053 (0.0033) [-0.0119, +0.0009]  [359 s]
+  hidden-taste ref., 12 cand.    0.013   0.0320     0.0647   -0.0069 (0.0033) [-0.0136, -0.0009]  [443 s]
+  hidden-taste ref., anyone      0.047   0.0459     0.0850   +0.0070 (0.0040) [-0.0010, +0.0152]  [526 s]
   LLM shoppers against content filter: +0.0004 (0.0024) [-0.0045, +0.0055]
 
-occasions: 1,246 users bought a launched product in days 23 to 30. Candidates per product: 12; synthetic buyers per product: 3. Model Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f): 150 requests, 490 input and 20.6 output tokens each, 42 minutes  [573 s]
+occasions: 1,246 users bought a launched product in days 23 to 30. Candidates per product: 12; synthetic buyers per product: 3. Model Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f): 150 requests, 490 input and 20.6 output tokens each, 42 minutes  [575 s]
   products with a real test-week buyer among their 12 candidates: 3.3%
-  no synthetic buyers          0.000   0.0435     0.0888     [691 s]
-  content filter               0.000   0.0446     0.0897   +0.0011 (0.0029) [-0.0048, +0.0065]  [811 s]
-  LLM shoppers                 0.007   0.0409     0.0802   -0.0026 (0.0028) [-0.0083, +0.0026]  [932 s]
-  hidden taste (reference)     0.033   0.0421     0.0826   -0.0014 (0.0031) [-0.0078, +0.0046]  [1053 s]
-  hidden taste, any shopper    0.047   0.0528     0.1024   +0.0093 (0.0036) [+0.0020, +0.0159]  [1172 s]
+  LLM shoppers: 0 answers cut off, 0 not matching the schema; 0 products got fewer than 3 distinct buyers (the model named a shopper twice)
+  no synthetic buyers            0.000   0.0435     0.0888     [691 s]
+  content filter                 0.000   0.0446     0.0897   +0.0011 (0.0029) [-0.0048, +0.0065]  [804 s]
+  LLM shoppers                   0.007   0.0409     0.0802   -0.0026 (0.0028) [-0.0083, +0.0026]  [918 s]
+  hidden-taste ref., 12 cand.    0.033   0.0421     0.0826   -0.0014 (0.0031) [-0.0078, +0.0046]  [1030 s]
+  hidden-taste ref., anyone      0.047   0.0528     0.1024   +0.0093 (0.0036) [+0.0020, +0.0159]  [1143 s]
   LLM shoppers against content filter: -0.0037 (0.0022) [-0.0079, +0.0005]

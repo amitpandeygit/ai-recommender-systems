@@ -1,6 +1,7 @@
 
-reasons: 300 texts, 50 per language. The rules' verdict: share that pass every rule, and the share with each problem  [55 s]
+reasons: 300 texts, 50 per language. The rules' verdict: share that pass every rule, and the share with each problem  [51 s]
                                              pass  length  script  unfaithful  claim
+  Qwen3.5-4B's first attempts: 0 answers cut off, 0 not matching the schema
   template                                 100.0%    0.0%    0.0%        0.0%   0.0%
   Qwen3.5-4B, one attempt                   96.3%    3.7%    0.0%        0.0%   0.0%
   loop, rules                               97.3%    2.7%    0.0%        0.0%   0.0%
@@ -26,8 +27,9 @@ reasons: 300 texts, 50 per language. The rules' verdict: share that pass every r
   the critics against the rules, on the one-attempt texts
   Qwen3.5-4B              300 texts, the rules fail  11; the critic missed   7 of them and raised  31 false alarms; agreement 87.3%; 7.46 s per text
 
-headlines: 300 texts, 50 per language. The rules' verdict: share that pass every rule, and the share with each problem  [57 s]
+headlines: 300 texts, 50 per language. The rules' verdict: share that pass every rule, and the share with each problem  [53 s]
                                              pass  length  script  unfaithful  claim
+  Qwen3.5-4B's first attempts: 0 answers cut off, 0 not matching the schema
   template                                 100.0%    0.0%    0.0%        0.0%   0.0%
   Qwen3.5-4B, one attempt                   73.3%   26.0%    0.0%        2.7%   0.0%
   loop, rules                               85.7%   14.0%    0.0%        0.7%   0.0%
@@ -54,4 +56,4 @@ headlines: 300 texts, 50 per language. The rules' verdict: share that pass every
   Qwen3.5-4B              300 texts, the rules fail  80; the critic missed  70 of them and raised   7 false alarms; agreement 74.3%; 6.78 s per text
   Claude Sonnet 5.5       300 texts, the rules fail  80; the critic missed  34 of them and raised   6 false alarms; agreement 86.7%; 1.48 s per text, USD 1.20 per 1,000
 
-[59 s]
+[54 s]

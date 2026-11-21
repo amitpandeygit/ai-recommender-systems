@@ -1,7 +1,7 @@
 Environment: Python 3.13.18, NumPy 2.5.4, PyTorch 2.15.0, Linux x86_64, 2 CPUs
 
-occasions: 6,494 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f)) gave 'no common reason' for 270 (90.0%); the critic kept 9 of the other 30  [67 s]
-  pairs bought together in an occasion basket: 89; an intent kept for 3.4% of them and for 2.8% of the others
+occasions: 6,494 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f)) gave 'no common reason' for 270 (90.0%); the critic kept 9 of the other 30  [63 s]
+  pairs that appeared in a consenting occasion basket before day 23: 83 (they may also have been bought together for other reasons); an intent kept for 2.4% of them and for 3.2% of the others
   6 distinct kept phrases; 1 intent nodes of at least 3 phrases: new home (4)
     e.g. [home: lamp, mirror, blanket, best] + [skincare: sunscreen, face cream, face wash, review] -> 'home and skincare' (rejected by the critic)
     e.g. [phone gear: speaker, smartwatch, phone stand, 2026] + [home: curtain, rug, pillow, best] -> 'no common reason' (rejected by the critic)
@@ -14,12 +14,14 @@ occasions: 6,494 cross-category pairs bought together in at least 2 orders befor
   concepts tagged: 60 of 60; products linked to an intent: 1,534 of 1,534; launched: 150 of 150
   each intent node's concepts, and the planted occasion they overlap most (Jaccard of concept sets):
     new home                    adapter, ball, blanket, blender, body lotion, bottle, building blocks, cable, car mount, chair, cooking pot, crayons, curtain, doll, dress, earbuds, face cream, face mask, face wash, frying pan, handbag, hat, jacket, jeans, kettle, kite, knife, lamp, marbles, mirror, moisturizer, mug, oven, phone case, phone stand, pillow, plate, power bank, puzzle, rug, sandals, scarf, screen protector, scrub, serum, shelf, shirt, shoes, skirt, slime, smartwatch, soap, speaker, spoon, sunscreen, teddy bear, toner, vase, wall clock, yoyo  ->  new home 0.13
-  Launch test, 1,246 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10)  [471 s]
+  Launch test, 1,246 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10 against LightGCN + KG; for the last row, against KG without word nodes)  [630 s]
     LightGCN + KG (Chapter 10)           0.0435     0.0888   
     + LLM intent nodes                   0.0432     0.0867   -0.0003 (0.0026) [-0.0054, +0.0048]
     + planted occasions (reference)      0.0431     0.0891   -0.0004 (0.0026) [-0.0058, +0.0044]
+    KG without word nodes                0.0435     0.0854   +0.0000 (0.0020) [-0.0036, +0.0038]
+      + planted occasions                0.0421     0.0850   -0.0014 (0.0025) [-0.0064, +0.0038]
 
-control: 5,163 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f)) gave 'no common reason' for 276 (92.0%); the critic kept 4 of the other 24  [471 s]
+control: 5,163 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f)) gave 'no common reason' for 276 (92.0%); the critic kept 4 of the other 24  [630 s]
   1 distinct kept phrases; 0 intent nodes of at least 3 phrases: 
     e.g. [home: lamp, mirror, blanket, best] + [kitchen: bottle, mug, blender, quick] -> 'kitchen setup' (rejected by the critic)
     e.g. [phone gear: speaker, smartwatch, phone stand, 2026] + [kitchen: oven, knife, blender, top, meme] -> 'no common reason' (rejected by the critic)
@@ -30,8 +32,10 @@ control: 5,163 cross-category pairs bought together in at least 2 orders before 
     e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: blanket, rug, curtain, best, flood] -> 'no common reason' (rejected by the critic)
     e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: rug, blanket, pillow, top] -> 'no common reason' (rejected by the critic)
   concepts tagged: 0 of 60; products linked to an intent: 0 of 1,534; launched: 0 of 150
-  Launch test, 978 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10)  [666 s]
+  Launch test, 978 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10 against LightGCN + KG; for the last row, against KG without word nodes)  [943 s]
     LightGCN + KG (Chapter 10)           0.0389     0.0796   
     + planted occasions (reference)      0.0368     0.0752   -0.0021 (0.0029) [-0.0077, +0.0037]
+    KG without word nodes                0.0394     0.0780   +0.0004 (0.0022) [-0.0039, +0.0047]
+      + planted occasions                0.0376     0.0755   -0.0017 (0.0031) [-0.0078, +0.0041]
 
-Model: Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f); llama-cpp-python 0.3.37, 2 threads, x86_64; greedy decoding, answers constrained by JSON schemas. LightGCN + KG: 3 layers, 40 epochs, means over seeds 0, 1 and 2.  [667 s]
+Model: Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f); llama-cpp-python 0.3.37, 2 threads, x86_64; greedy decoding, answers constrained by JSON schemas. LightGCN + KG: 3 layers, 40 epochs, means over seeds 0, 1 and 2.  [943 s]

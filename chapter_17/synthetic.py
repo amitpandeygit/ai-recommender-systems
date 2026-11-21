@@ -15,12 +15,14 @@ Chapter 3's content similarity. Each arm adds 3 synthetic buyers per product:
   content filter       - the 3 candidates with the most similar purchases (no model)
   LLM shoppers         - the 3 the model picks from the 12 (enrich.WORKHORSE), shown each
                          candidate's 3 latest purchases
-  hidden taste         - the 3 candidates whose hidden taste matches the product best, a
-                         perfect simulator that only the simulation has
-  hidden taste, any shopper
-                       - the 3 shoppers, among all who bought before day 23, whose hidden
-                         taste matches the product best: a perfect simulator with a perfect
-                         candidate list
+  hidden-taste reference, 12 candidates
+                       - the 3 candidates whose hidden taste vector has the largest dot
+                         product with the product's, a privileged reference only the
+                         simulation has. It is not a perfect simulator: real purchases
+                         also depend on how often a shopper buys, on chance, on
+                         complements and, in the occasion shop, on occasions
+  hidden-taste reference, anyone
+                       - the same choice among all shoppers who bought before day 23
 
 The test is section 10.5's launch test (NDCG@10 and recall@10, the 978 users who bought a
 launched product in days 23 to 30), in Chapter 3's shop and in the shop with occasion
@@ -154,8 +156,8 @@ def run(W, orders, world, t0):
     shoppers = np.array(sorted(test[1]))
     anyone = {i: [int(u) for u in shoppers[np.argsort(-(users["vec"][shoppers] @ items["vec"][i]), kind="stable")[:PICKS]]]
               for i in cands}
-    arms = {"no synthetic buyers": {}, "content filter": filt, "LLM shoppers": picks, "hidden taste (reference)": taste,
-            "hidden taste, any shopper": anyone}
+    arms = {"no synthetic buyers": {}, "content filter": filt, "LLM shoppers": picks,
+            "hidden-taste ref., 12 cand.": taste, "hidden-taste ref., anyone": anyone}
     # how often each arm picks a candidate who really bought the product in the test week
     pos_users = {}
     for u, its in test[2].items():
@@ -166,6 +168,13 @@ def run(W, orders, world, t0):
           f"{CANDIDATES}; synthetic buyers per product: {PICKS}. {u_}  [{time.time() - t0:.0f} s]", flush=True)
     any_buyer = np.mean([bool(set(us) & pos_users.get(i, set())) for i, us in cands.items()])
     print(f"  products with a real test-week buyer among their {CANDIDATES} candidates: {any_buyer:.1%}")
+    schema = {"type": "object", "properties": {"buyers": {"type": "array", "minItems": PICKS, "maxItems": PICKS,
+                                                          "items": {"type": "string",
+                                                                    "enum": [f"S{k + 1}" for k in range(CANDIDATES)]}}},
+              "required": ["buyers"]}
+    short = sum(len(v) < PICKS for v in picks.values())
+    print(f"  LLM shoppers: {llm.failures(recs, [schema] * len(recs))}; {short} products got fewer than {PICKS} "
+          f"distinct buyers (the model named a shopper twice)")
     res = {}
     for arm, syn in arms.items():
         hit = np.mean([len(set(us) & pos_users.get(i, set())) for i, us in syn.items()]) if syn else 0.0
@@ -174,7 +183,7 @@ def run(W, orders, world, t0):
         res[arm] = nd
         against = "" if arm == "no synthetic buyers" else "{:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(
             *paired(nd, res["no synthetic buyers"], tu))
-        print(f"  {arm:<26}{hit:>8.3f}{nd.mean():>9.4f}{rc.mean():>11.4f}   {against}  [{time.time() - t0:.0f} s]",
+        print(f"  {arm:<28}{hit:>8.3f}{nd.mean():>9.4f}{rc.mean():>11.4f}   {against}  [{time.time() - t0:.0f} s]",
               flush=True)
     print("  LLM shoppers against content filter: {:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(
         *paired(res["LLM shoppers"], res["content filter"], tu)))

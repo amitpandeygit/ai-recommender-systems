@@ -1,7 +1,7 @@
 Environment: Python 3.13.18, NumPy 2.5.4, PyTorch 2.15.0, Linux x86_64, 2 CPUs
 
-occasions: 6,494 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Claude Sonnet 5.5 (claude-sonnet-5-5)) gave 'no common reason' for 190 (63.3%); the critic kept 65 of the other 110  [69 s]
-  pairs bought together in an occasion basket: 89; an intent kept for 32.6% of them and for 17.1% of the others
+occasions: 6,494 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Claude Sonnet 5.5 (claude-sonnet-5-5)) gave 'no common reason' for 190 (63.3%); the critic kept 65 of the other 110  [61 s]
+  pairs that appeared in a consenting occasion basket before day 23: 83 (they may also have been bought together for other reasons); an intent kept for 32.5% of them and for 17.5% of the others
   37 distinct kept phrases; 6 intent nodes of at least 3 phrases: new home setup (22); children's gift shopping (11); decorating child's room (10); travel essentials (7); personal makeover (7); summer outdoor play (5)
     e.g. [home: lamp, mirror, blanket, best] + [skincare: sunscreen, face cream, face wash, review] -> 'home and self-care' (rejected by the critic)
     e.g. [phone gear: speaker, smartwatch, phone stand, 2026] + [home: curtain, rug, pillow, best] -> 'home decor refresh' (rejected by the critic)
@@ -19,12 +19,14 @@ occasions: 6,494 cross-category pairs bought together in at least 2 orders befor
     travel essentials           adapter, body lotion, bottle, cable, car mount, earbuds, face cream, face mask, face wash, handbag, hat, jacket, moisturizer, phone case, phone stand, pillow, power bank, sandals, scarf, shoes, smartwatch, soap, speaker, sunscreen  ->  road trip 0.29
     personal makeover           body lotion, dress, face cream, face mask, face wash, handbag, mirror, moisturizer, scarf, scrub, serum, shirt, shoes, skirt, smartwatch, toner  ->  gym 0.16
     summer outdoor play         ball, bottle, hat, kite, marbles, sandals, slime, sunscreen, yoyo  ->  beach holiday 0.60
-  Launch test, 1,246 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10)  [666 s]
+  Launch test, 1,246 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10 against LightGCN + KG; for the last row, against KG without word nodes)  [624 s]
     LightGCN + KG (Chapter 10)           0.0435     0.0888   
     + LLM intent nodes                   0.0411     0.0858   -0.0024 (0.0027) [-0.0078, +0.0026]
     + planted occasions (reference)      0.0431     0.0891   -0.0004 (0.0026) [-0.0058, +0.0044]
+    KG without word nodes                0.0435     0.0854   +0.0000 (0.0020) [-0.0036, +0.0038]
+      + planted occasions                0.0421     0.0850   -0.0014 (0.0025) [-0.0064, +0.0038]
 
-control: 5,163 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Claude Sonnet 5.5 (claude-sonnet-5-5)) gave 'no common reason' for 200 (66.7%); the critic kept 61 of the other 100  [666 s]
+control: 5,163 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Claude Sonnet 5.5 (claude-sonnet-5-5)) gave 'no common reason' for 200 (66.7%); the critic kept 61 of the other 100  [624 s]
   38 distinct kept phrases; 6 intent nodes of at least 3 phrases: furnishing new home (17); decorating child's room (16); summer vacation travel (10); family gift shopping (7); home self-care (5); personal appearance refresh (4)
     e.g. [home: lamp, mirror, blanket, best] + [kitchen: bottle, mug, blender, quick] -> 'home decorating' (rejected by the critic)
     e.g. [phone gear: speaker, smartwatch, phone stand, 2026] + [kitchen: oven, knife, blender, top, meme] -> 'no common reason' (rejected by the critic)
@@ -42,9 +44,11 @@ control: 5,163 cross-category pairs bought together in at least 2 orders before 
     family gift shopping        ball, blanket, building blocks, cooking pot, crayons, doll, earbuds, frying pan, handbag, jacket, jeans, kettle, kite, marbles, mug, phone case, phone stand, plate, power bank, puzzle, scarf, shirt, slime, smartwatch, soap, speaker, teddy bear, vase, yoyo  ->  child's birthday 0.24
     home self-care              blender, body lotion, bottle, face cream, face mask, face wash, moisturizer, pillow, puzzle, scrub, serum, soap, sunscreen, toner  ->  gym 0.18
     personal appearance refresh body lotion, dress, face cream, face mask, face wash, handbag, hat, jacket, jeans, mirror, moisturizer, phone case, sandals, scarf, scrub, serum, shirt, shoes, skirt, smartwatch, toner  ->  winter 0.17
-  Launch test, 978 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10)  [984 s]
+  Launch test, 978 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10 against LightGCN + KG; for the last row, against KG without word nodes)  [1026 s]
     LightGCN + KG (Chapter 10)           0.0389     0.0796   
     + LLM intent nodes                   0.0355     0.0738   -0.0034 (0.0029) [-0.0089, +0.0022]
     + planted occasions (reference)      0.0368     0.0752   -0.0021 (0.0029) [-0.0077, +0.0037]
+    KG without word nodes                0.0394     0.0780   +0.0004 (0.0022) [-0.0039, +0.0047]
+      + planted occasions                0.0376     0.0755   -0.0017 (0.0031) [-0.0078, +0.0041]
 
-Model: Claude Sonnet 5.5 (claude-sonnet-5-5); anthropic 2.11.0; greedy decoding, answers constrained by JSON schemas. LightGCN + KG: 3 layers, 40 epochs, means over seeds 0, 1 and 2.  [986 s]
+Model: Claude Sonnet 5.5 (claude-sonnet-5-5); anthropic 2.11.0; greedy decoding, answers constrained by JSON schemas. LightGCN + KG: 3 layers, 40 epochs, means over seeds 0, 1 and 2.  [1028 s]

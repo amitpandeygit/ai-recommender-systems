@@ -20,8 +20,13 @@ Every text is checked by rules that the simulation can apply exactly (RULES):
   script      - Devanagari for Hindi, Arabic letters for Arabic, Latin letters otherwise
   faithful    - every catalogue concept it names (in its language or in English) is one
                 of the concepts it was given
-  no claim    - no claim the platform cannot back: popular, trending, free, best, a
-                discount, a number, and the sales phrases of listings.py
+  no claim    - none of the words of a claim the platform cannot back: popular,
+                trending, free, best, a discount, a number (only "2026" is allowed, and
+                only when the title has it), and the sales phrases of listings.py
+
+The rules check words, not the truth of sentences: "Clinically proven sunscreen" or
+"Made in Italy" passes them when sunscreen is a given concept. They find the problems
+they look for, and section 17.6 reports exactly that.
 
 A template that fills a fixed sentence with the given concepts is the baseline. The
 generator and evaluator loop (Listing 17.7) writes, checks, and on failure writes again
@@ -110,7 +115,8 @@ def claims_made(text, language, allowed):
     lang = LANGUAGES[language]
     t = _norm(text)
     bad = [c for c in CLAIMS[lang] + CLAIMS["en"] + SALES[lang] + SALES["en"] if f" {_norm(c).strip()} " in t]
-    if re.search(r"\d", text) and "2026" not in allowed:
+    rest = text.replace("2026", "") if "2026" in allowed else text   # the year only when the title has it
+    if re.search(r"\d", rest):
         bad.append("a number")
     return bad
 
@@ -327,6 +333,7 @@ if __name__ == "__main__":
         print(f"  {'':<40}{'pass':>7}{'length':>8}{'script':>8}{'unfaithful':>12}{'claim':>7}")
         rows = {"template": [template(task, t) for t in tasks]}
         first, recs = write(task, tasks)
+        print(f"  {GENERATOR}'s first attempts: {llm.failures(recs, [TEXT_SCHEMA[task]] * len(recs))}")
         rows[f"{GENERATOR}, one attempt"] = first
         loops = {}
         for evaluator, critic in (("rules", None), ("critic", CRITIC_MODEL), ("both", CRITIC_MODEL)):

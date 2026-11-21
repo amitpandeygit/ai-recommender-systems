@@ -173,14 +173,15 @@ def planted(items):
 
 
 # ---------------------------------------------------------------- 6. the launch test
-def launch_scores(W, test, extra_intents, seed):
-    """LightGCN + KG on the purchase graph, optionally with product-intent edges."""
+def launch_scores(W, test, extra_intents, seed, relations=PRODUCT_RELATIONS):
+    """LightGCN + KG on the purchase graph, optionally with product-intent edges, with the
+    knowledge graph's relations given (the ablation leaves out the title words)."""
     users, items = W["users"], W["items"]
     pairs, bought, _, tu = test
     n_u, n_i = len(users["vec"]), len(items["vec"])
     prods = np.flatnonzero(items["is_product"])
     rows, cols = pairs[:, 0], pairs[:, 1] + n_u
-    e, n_ent = kg_edges(W, prods, PRODUCT_RELATIONS, n_u + n_i)
+    e, n_ent = kg_edges(W, prods, relations, n_u + n_i)
     rows, cols, n_nodes = np.r_[rows, e[0]], np.r_[cols, e[1]], n_u + n_i + n_ent
     if extra_intents is not None:
         p, k = np.nonzero(extra_intents)
@@ -207,15 +208,18 @@ def run_world(W, orders, topup, world, t0, occ_extra=None):
           f"{len(pairs)} drawn. The model ({llm.model_id(MODEL)}) gave 'no common reason' for {none.sum()} "
           f"({none.mean():.1%}); the critic kept {len(kept)} of the other {len(pairs) - none.sum()}  "
           f"[{time.time() - t0:.0f} s]", flush=True)
-    if occ_extra is not None:                                    # which pairs came from occasion baskets
-        o_orders = set(zip(occ_extra["order_id"].tolist(), occ_extra["item_id"].tolist()))
+    if occ_extra is not None:                    # which pairs appeared in an occasion basket, under the same
+        ok_row = (W["users"]["current_consent"][occ_extra["user_id"]] & (occ_extra["time"] < 23 * DAY)  # cutoff and
+                  & ~launched[occ_extra["item_id"]] & (occ_extra["item_id"] != topup))                    # consent
+        o_orders = set(zip(occ_extra["order_id"][ok_row].tolist(), occ_extra["item_id"][ok_row].tolist()))
         by_order = {}
         for o, i in o_orders:
             by_order.setdefault(o, set()).add(i)
         occ_pair = {(min(a, b), max(a, b)) for s in by_order.values() for a in s for b in s if a != b}
         is_occ = np.array([p in occ_pair for p in pairs])
         ok = np.array(typical) & ~none
-        print(f"  pairs bought together in an occasion basket: {is_occ.sum()}; an intent kept for "
+        print(f"  pairs that appeared in a consenting occasion basket before day 23: {is_occ.sum()} (they may also "
+              f"have been bought together for other reasons); an intent kept for "
               f"{ok[is_occ].mean():.1%} of them and for {ok[~is_occ].mean():.1%} of the others")
     names, node = group_intents(kept)
     print(f"  {len(set(kept))} distinct kept phrases; {len(names)} intent nodes of at least {MIN_GROUP} phrases: "
@@ -242,20 +246,25 @@ def run_world(W, orders, topup, world, t0, occ_extra=None):
         return None
     test = product_test(W, orders, 23 * DAY, 30 * DAY, launched)
     tu = test[3]
-    arms = {"LightGCN + KG (Chapter 10)": None}
+    no_words = tuple(r for r in PRODUCT_RELATIONS if r != "word")
+    arms = {"LightGCN + KG (Chapter 10)": (None, PRODUCT_RELATIONS)}
     if names:
-        arms["+ LLM intent nodes"] = M
-    arms["+ planted occasions (reference)"] = planted(items)
+        arms["+ LLM intent nodes"] = (M, PRODUCT_RELATIONS)
+    arms["+ planted occasions (reference)"] = (planted(items), PRODUCT_RELATIONS)
+    if os.environ.get("CH17_COSMO_ABLATION", "1") == "1":       # the same two without the title-word nodes
+        arms["KG without word nodes"] = (None, no_words)
+        arms["  + planted occasions"] = (planted(items), no_words)
     res = {}
-    for arm, extra in arms.items():
-        runs = [product_ranking(launch_scores(W, test, extra, s), tu, launched, test[1], test[2]) for s in SEEDS]
+    for arm, (extra, rel) in arms.items():
+        runs = [product_ranking(launch_scores(W, test, extra, s, rel), tu, launched, test[1], test[2]) for s in SEEDS]
         res[arm] = (np.mean([r[0] for r in runs], axis=0), np.mean([r[1] for r in runs], axis=0))
     print(f"  Launch test, {len(tu):,} users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; "
-          f"against: paired difference in NDCG@10)  [{time.time() - t0:.0f} s]")
+          f"against: paired difference in NDCG@10 against LightGCN + KG; for the last row, against KG without word nodes)  [{time.time() - t0:.0f} s]")
     base = res["LightGCN + KG (Chapter 10)"][0]
     for arm, (nd, rc) in res.items():
+        ref = res["KG without word nodes"][0] if arm == "  + planted occasions" else base
         against = "" if arm.startswith("LightGCN") else "{:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(
-            *paired(nd, base, tu))
+            *paired(nd, ref, tu))
         print(f"    {arm:<34}{nd.mean():>9.4f}{rc.mean():>11.4f}   {against}")
     return res
 

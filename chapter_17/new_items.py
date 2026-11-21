@@ -8,8 +8,11 @@ established item keeps its clean record. The arms:
   as written        - the exact dictionary's record (the declared category and the words
                       found exactly), and the listing as written for the encoder
   fuzzy dictionary  - the fuzzy dictionary's record, rendered in the item's language
+  romanised dictionary - the fuzzy dictionary that also knows each Hindi word typed in
+                      Latin letters the way the listings type it (listings.romanised_forms)
   dictionary + LLM  - the fuzzy dictionary, with the words it could not read sent to the
                       language model (enrich.hybrid, enrich.WORKHORSE), rendered
+  romanised + LLM   - the romanised dictionary with the model behind it
   true record       - the item's real category and title, rendered the same way (a
                       reference that no real platform has)
 
@@ -39,7 +42,8 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from listings import LANGUAGES, _forms, as_items, exact_dictionary, fuzzy_dictionary, listings, new_uploads  # noqa: E402
+from listings import (LANGUAGES, _forms, as_items, exact_dictionary, fuzzy_dictionary, listings, new_uploads,  # noqa: E402
+                      romanised_forms)
 from content_data import MODELS, load, modalities, text_embeddings  # noqa: E402
 from content_models import fuse, profiles  # noqa: E402
 from graph_data import DAY, click_graph, environment, paired, phase  # noqa: E402
@@ -57,7 +61,7 @@ torch.set_num_threads(2)
 SEEDS = (0, 1, 2)
 EPOCHS = {"videos": 240, "products": 40}
 PENALTY = {"videos": 10.0, "products": 1.0}
-ARMS = ("as written", "fuzzy dictionary", "dictionary + LLM", "true record")
+ARMS = ("as written", "fuzzy dictionary", "romanised dictionary", "dictionary + LLM", "romanised + LLM", "true record")
 VOCAB = list(WORDS)
 
 
@@ -68,8 +72,9 @@ def render(tokens, language):
 
 def arm_records(W, L, ids):
     """Each arm's record and encoder text for the listed items."""
-    forms_all = _forms(range(len(LANGUAGES)))
+    forms_all, forms_rom = _forms(range(len(LANGUAGES))), romanised_forms()
     llm_recs, _ = enrich.hybrid(enrich.WORKHORSE, L, ids)
+    rom_llm, _ = enrich.hybrid(enrich.WORKHORSE, L, ids, forms_rom)
     items = W["items"]
     out = {}
     for arm in ARMS:
@@ -80,8 +85,12 @@ def arm_records(W, L, ids):
                 continue
             if arm == "fuzzy dictionary":
                 r = fuzzy_dictionary(L[i], forms_all)
+            elif arm == "romanised dictionary":
+                r = fuzzy_dictionary(L[i], forms_rom)
             elif arm == "dictionary + LLM":
                 r = llm_recs[i]
+            elif arm == "romanised + LLM":
+                r = rom_llm[i]
             else:
                 r = {"category": int(items["category"][i]), "concepts": sorted({str(t) for t in items["title"][i]})}
             recs[i], texts[i] = r, render(r["concepts"], L[i]["language"])
@@ -225,7 +234,7 @@ if __name__ == "__main__":
     print(f"\nNew videos, test week: the slot-4 video among the {(W['video'] & ~W['snaps'][23]['ok']).sum():,} new "
           f"videos, for {len(R['user']):,} requests. Slot-4 plays; against: paired difference against 'as written' "
           f"for the same method, standard error in brackets")
-    print(f"  {'':<20}" + "".join(f"{m:>32}" for m in ("Chapter 8's source", "LightGCN + KG", "content map")))
+    print(f"  {'':<22}" + "".join(f"{m:>32}" for m in ("Chapter 8's source", "LightGCN + KG", "content map")))
     for arm in ARMS:
         cells = []
         for m in ("Chapter 8's source", "LightGCN + KG", "content map"):
@@ -235,7 +244,7 @@ if __name__ == "__main__":
             else:
                 d, se = paired(p, np.mean(res[("as written", m)], axis=0), R["user"])[:2]
                 cells.append(f"{p.mean():.4f} {d:+.4f} ({se:.4f})")
-        print(f"  {arm:<20}" + "".join(f"{c:>32}" for c in cells))
+        print(f"  {arm:<22}" + "".join(f"{c:>32}" for c in cells))
     del R
     from tesselo_shop import build
     _, items_b, _, _, orders, _ = build(W["cfg"])
@@ -243,7 +252,7 @@ if __name__ == "__main__":
     res, tu = product_test_arms(W, arms, orders, t0)
     print(f"\nLaunched products, test week: the 150 ranked for {len(tu):,} users. NDCG@10, recall@10; against: paired "
           f"difference in NDCG@10 against 'as written' for the same method  [{time.time() - t0:.0f} s]")
-    print(f"  {'':<20}" + "".join(f"{m:>36}" for m in ("content similarity", "LightGCN + KG", "content map")))
+    print(f"  {'':<22}" + "".join(f"{m:>36}" for m in ("content similarity", "LightGCN + KG", "content map")))
     for arm in ARMS:
         cells = []
         for m in ("content similarity", "LightGCN + KG", "content map"):
@@ -255,6 +264,6 @@ if __name__ == "__main__":
                 base = np.mean([r[0] for r in res[("as written", m)]], axis=0)
                 d, se = paired(nd, base, tu)[:2]
                 cells.append(f"{nd.mean():.4f} {rc.mean():.4f} {d:+.4f} ({se:.4f})")
-        print(f"  {arm:<20}" + "".join(f"{c:>36}" for c in cells))
+        print(f"  {arm:<22}" + "".join(f"{c:>36}" for c in cells))
     print(f"  (models with seeds are means over seeds 0, 1 and 2; a random order has recall@10 {10 / 150:.4f})  "
           f"[{time.time() - t0:.0f} s]")

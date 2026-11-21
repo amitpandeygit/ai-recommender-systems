@@ -1,4 +1,4 @@
-2,369 messy listings: 2,219 videos new at day 16 or 23 and 150 launched products  [44 s]
+2,369 messy listings: 2,219 videos new at day 16 or 23 and 150 launched products  [49 s]
 Faults: wrong category 341 (14.4%), says nothing 216 (9.1%), word dropped 320 (13.5%), English mixed 358 (15.1%), romanised Hindi 237 (10.0%), typo 929 (39.2%), sales phrase 691 (29.2%); clean 479
 Hindi listings typed in Latin letters: 237 of 455
 
@@ -16,6 +16,10 @@ The first listing of each language:
   item 3 (Arabic video, tech, declared news): 'شاحن 2026 robot جهاز عرض خاص'
       clean title: 'شاحن جهاز روبوت 2026'; faults: English mixed, sales phrase, wrong category
 
-exact dictionary: category 85.6%, concepts precision 0.999, recall 0.776, F1 0.873  [44 s]
+Held-out spelling test: 236 Hindi listings typed in Latin letters the second way, for example 'heyrastaail aaeelaainar naakhoon 2026'
 
-fuzzy dictionary: category 97.6%, concepts precision 0.990, recall 0.899, F1 0.943  [54 s]
+exact dictionary: category 85.6%, concepts precision 0.999, recall 0.776, F1 0.873  [49 s]
+
+fuzzy dictionary: category 97.6%, concepts precision 0.990, recall 0.899, F1 0.943  [63 s]
+
+romanised dictionary: category 98.4%, concepts precision 0.994, recall 0.973, F1 0.983  [79 s]

@@ -105,7 +105,7 @@ if __name__ == "__main__":
     tc = top_creators(W, S)
     new_ok = W["video"] & ~ok
     lang = users["language"][R["user"]]
-    print(f"  {'':<20}{'NDCG@10':>9}{'coverage':>10}{'top-10% cr.':>12}{'online':>9}{'against as written':>20}"
+    print(f"  {'':<22}{'NDCG@10':>9}{'coverage':>10}{'top-10% cr.':>12}{'online':>9}{'against as written':>20}"
           f"{'95% interval':>20}{'new plays':>11}{'same language':>15}{'revenue':>9}{'rule breaks':>13}"
           f"{'not allowed':>13}")
     base, res = None, {}
@@ -128,11 +128,21 @@ if __name__ == "__main__":
         else:
             m_, se, lo, hi = paired(on, base, R["user"])
             d, ci = f"{m_:+.4f} ({se:.4f})", f"[{lo:+.4f}, {hi:+.4f}]"
-        print(f"  {key:<20}{ndcg(R, top):>9.4f}{cov:>10.1%}{cr:>12.1%}{on.mean():>9.4f}{d:>20}{ci:>20}"
+        print(f"  {key:<22}{ndcg(R, top):>9.4f}{cov:>10.1%}{cr:>12.1%}{on.mean():>9.4f}{d:>20}{ci:>20}"
               f"{new_plays:>11.4f}{same_lang:>15.1%}{rev.mean():>9.4f}{breaks:>13}{shown_bad:>13}")
         res[key] = on
-    print("  dictionary + LLM against fuzzy dictionary (paired, users resampled): {:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]"
-          .format(*paired(res["dictionary + LLM"], res["fuzzy dictionary"], R["user"])))
+    for a_, b_ in (("dictionary + LLM", "fuzzy dictionary"), ("romanised dictionary", "fuzzy dictionary"),
+                   ("romanised + LLM", "romanised dictionary")):
+        print(f"  {a_} against {b_} (paired, users resampled): " + "{:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(
+            *paired(res[a_], res[b_], R["user"])))
+    print("  by app language, each arm against as written: paired difference in online, standard error, 95% interval "
+          "(users of that language resampled)")
+    for g in range(len(LANGUAGES)):
+        m = lang == g
+        cells = [f"{res[k][m].mean():.4f}" if k == ARMS[0] else
+                 "{:+.4f} ({:.4f}) [{:+.4f}, {:+.4f}]".format(*paired(res[k][m], res[ARMS[0]][m], R["user"][m]))
+                 for k in ARMS]
+        print(f"    {LANGUAGES[g]} ({m.sum():,} requests): " + "; ".join(f"{k} {c}" for k, c in zip(ARMS, cells)))
     print("  online by app language: " + "  ".join(
         f"{LANGUAGES[g]} ({(lang == g).sum():,}): " + "/".join(f"{res[k][lang == g].mean():.4f}" for k in ARMS)
         for g in range(len(LANGUAGES))))

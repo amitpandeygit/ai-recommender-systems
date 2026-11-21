@@ -80,12 +80,22 @@ _SIGNS = {"ा": "a", "ि": "i", "ी": "i", "ु": "u", "ू": "u", "े": "e"
           "ृ": "ri", "ॉ": "o"}
 
 
-def romanise(text):
+# A second way of typing Hindi, for the held-out test of section 17.3: long vowels doubled
+# ("aa", "ee", "oo"), "w" for व, "j" and "ph" for the nukta letters ज़ and फ़, and "n" for
+# every nasal. It was written from common informal spellings ("chaawal", "teekha"), not
+# from the listings, and no dictionary in this chapter contains its forms.
+_SECOND = {"cons": {"व": "w"}, "nukta": {"ज": "j", "फ": "ph"},
+           "long": {"आ": "aa", "ई": "ee", "ऊ": "oo", "ा": "aa", "ी": "ee", "ू": "oo"}}
+
+
+def romanise(text, style="first"):
     """Devanagari in Latin letters, the way many people type Hindi on a phone. Each
     consonant carries an "a" unless a vowel sign or a virama follows; that "a" is dropped
     at the end of a word (but kept after a cluster ending in r, y or v, as in "samudra") and between two
     pronounced vowels, a rough form of Hindi's schwa deletion ("चावल" becomes "chaval",
-    "फ़ुटबॉल" becomes "futbol")."""
+    "फ़ुटबॉल" becomes "futbol"). style="second" types the same words the second way
+    (_SECOND): "चावल" becomes "chaawal"."""
+    second = style == "second"
     text = unicodedata.normalize("NFD", text)
     words = []
     for word in text.split(" "):
@@ -94,13 +104,13 @@ def romanise(text):
             ch = word[i]
             nxt = word[i + 1] if i + 1 < len(word) else ""
             if ch in _CONS:
-                base = _CONS[ch]
+                base = _SECOND["cons"].get(ch, _CONS[ch]) if second else _CONS[ch]
                 if nxt == "\u093c":                         # nukta
-                    base = _NUKTA.get(ch, base)
+                    base = (_SECOND["nukta"] if second and ch in _SECOND["nukta"] else _NUKTA).get(ch, base)
                     i += 1
                     nxt = word[i + 1] if i + 1 < len(word) else ""
                 if nxt in _SIGNS:
-                    units.append([base, _SIGNS[nxt], "sign"])
+                    units.append([base, _SECOND["long"].get(nxt, _SIGNS[nxt]) if second else _SIGNS[nxt], "sign"])
                     i += 1
                 elif nxt == "\u094d":                       # virama: no vowel
                     units.append([base, "", "virama"])
@@ -108,7 +118,7 @@ def romanise(text):
                 else:
                     units.append([base, "a", "inherent"])
             elif ch in _VOWELS:
-                units.append(["", _VOWELS[ch], "sign"])
+                units.append(["", _SECOND["long"].get(ch, _VOWELS[ch]) if second else _VOWELS[ch], "sign"])
             elif ch in ("\u0902", "\u0901"):               # anusvara, candrabindu
                 units.append(["n", "", "nasal"])
             elif ch == "\u0903":
@@ -118,7 +128,7 @@ def romanise(text):
             i += 1
         spoken = lambda u: u[2] in ("sign", "inherent")    # noqa: E731
         for k in range(len(units) - 1):                     # a nasal before p, b or m is written "m"
-            if units[k][2] == "nasal" and units[k + 1][0][:1] in ("p", "b", "m"):
+            if not second and units[k][2] == "nasal" and units[k + 1][0][:1] in ("p", "b", "m"):
                 units[k][0] = "m"
         cluster = len(units) > 1 and units[-2][2] == "virama" and units[-1][0] in ("r", "y", "v")
         if len(units) > 1 and units[-1][2] == "inherent" and not cluster:
@@ -221,6 +231,35 @@ def listings(W):
 
 
 FILE = HERE / "listings.json"
+HELDOUT_FILE = HERE / "listings_heldout.json"
+
+
+def heldout_listings(W):
+    """The held-out test of section 17.3: every listing written again with the same
+    generator, Hindi typed in Latin letters the second way (romanise(style="second"));
+    the Hindi listings typed in Latin letters are kept. Their faults are drawn as before,
+    but a typo's draws depend on a word's length, so a few can differ from listings()."""
+    global romanise
+    first = romanise
+    romanise = lambda s: first(s, style="second")           # noqa: E731
+    try:
+        L = listings(W)
+    finally:
+        romanise = first
+    return {i: v for i, v in L.items() if "romanised Hindi" in v["faults"]}
+
+
+def save_heldout(W):
+    import json
+    H = heldout_listings(W)
+    HELDOUT_FILE.write_text(json.dumps({"listings": {str(i): v for i, v in H.items()}}, ensure_ascii=False,
+                                       indent=0), encoding="utf-8")
+    return H
+
+
+def load_heldout():
+    import json
+    return {int(i): v for i, v in json.loads(HELDOUT_FILE.read_text(encoding="utf-8"))["listings"].items()}
 
 
 def save_listings(W):
@@ -251,6 +290,15 @@ def _forms(languages):
     for t, ws in WORDS.items():
         for lang in languages:
             forms.setdefault(_norm(ws[lang]).strip(), []).append(t)
+    return forms
+
+
+def romanised_forms():
+    """The fuzzy dictionary's forms, plus each Hindi word typed in Latin letters the first
+    way (romanise), the way the listings type it: a dictionary that knows that spelling."""
+    forms = _forms(range(len(LANGUAGES)))
+    for t, ws in WORDS.items():
+        forms.setdefault(_norm(romanise(ws[HINDI])).strip(), []).append(t)
     return forms
 
 
@@ -386,8 +434,12 @@ if __name__ == "__main__":
         print(f"  item {i} ({LANGUAGE_NAMES[lang]} {v['kind']}, {CATEGORIES[v['category']]}, declared "
               f"{CATEGORIES[v['declared']]}): {v['text']!r}\n      clean title: {clean!r}; faults: "
               f"{', '.join(v['faults']) or 'none'}")
-    forms_all = _forms(range(len(LANGUAGES)))
-    for name, f in (("exact dictionary", exact_dictionary), ("fuzzy dictionary", lambda x: fuzzy_dictionary(x, forms_all))):
+    H = save_heldout(W)
+    print(f"\nHeld-out spelling test: {len(H)} Hindi listings typed in Latin letters the second way, for example "
+          f"{next(iter(H.values()))['text']!r}")
+    forms_all, forms_rom = _forms(range(len(LANGUAGES))), romanised_forms()
+    for name, f in (("exact dictionary", exact_dictionary), ("fuzzy dictionary", lambda x: fuzzy_dictionary(x, forms_all)),
+                    ("romanised dictionary", lambda x: fuzzy_dictionary(x, forms_rom))):
         s = score({i: f(v) for i, v in L.items()}, L)
         print(f"\n{name}: category {s['category']:.1%}, concepts precision {s['precision']:.3f}, recall "
               f"{s['recall']:.3f}, F1 {s['f1']:.3f}  [{time.time() - t0:.0f} s]")

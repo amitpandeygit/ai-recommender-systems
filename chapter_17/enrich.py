@@ -16,12 +16,19 @@ real category and the concepts still present in the listing.
              (hybrid, Listing 17.4). Each row reports quality, speed and, for the hosted
              model, cost. The two dictionaries are the baselines.
   full     - the dictionary with the chosen model (WORKHORSE) on all 2,369 listings, by
-             language and by fault.
+             language and by fault, beside a third dictionary that also knows each Hindi
+             word typed in Latin letters the way the listings type it (romanised_forms),
+             alone and with the model behind it.
+  heldout  - the held-out spelling test: the Hindi listings typed in Latin letters written
+             again the second way (listings.romanise, style "second"), which no dictionary
+             knows; the dictionaries, and the romanised dictionary with the model behind it
+             (and, as a reference, the hosted model).
 
 Needs Python 3.12 or later and llama-cpp-python; reads llm_cache, so it runs without the
 models once the cache is filled. From the repository root:
     python chapter_17/enrich.py size
     python chapter_17/enrich.py full
+    python chapter_17/enrich.py heldout
 """
 import os
 for _name in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
@@ -36,7 +43,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from listings import (CATEGORIES, FAULTS, GENERIC_WORDS, LANGUAGES, N_VIDEO_CATEGORIES, _forms, exact_dictionary,  # noqa: E402
-                      fuzzy_dictionary, listings, majority_category, score)
+                      fuzzy_dictionary, heldout_listings, listings, majority_category, romanised_forms, score)
 from title_words import LANGUAGE_NAMES, WORDS  # noqa: E402
 import llm  # noqa: E402
 
@@ -199,6 +206,8 @@ if __name__ == "__main__":
     forms_all = _forms(range(len(LANGUAGES)))
     exact = {i: exact_dictionary(v) for i, v in L.items()}
     fuzzy = {i: fuzzy_dictionary(v, forms_all) for i, v in L.items()}
+    forms_rom = romanised_forms()
+    rom = {i: fuzzy_dictionary(v, forms_rom) for i, v in L.items()}
     header = (f"  {'':<30}{'category':>9}{'precision':>11}{'recall':>8}{'F1':>7}{'invented':>10}{'requests':>10}"
               f"{'s/listing':>11}{'USD/1,000':>11}")
 
@@ -227,6 +236,7 @@ if __name__ == "__main__":
             print(header)
             row("exact dictionary", exact, subset)
             row("fuzzy dictionary", fuzzy, subset)
+            row("romanised dictionary", rom, subset)
             for name in SIZES:
                 these = small if name == "Qwen3.5-9B" else ids
                 if not set(subset) <= set(these):
@@ -246,17 +256,42 @@ if __name__ == "__main__":
               f"memory do not fit in the 6 GB the job may use")
         print("\nModels: " + "; ".join(model_id(n) for n in SIZES) + f". Engine: {engine_version('Qwen3.5-2B')}, "
               "greedy decoding, the answer constrained by the JSON schema.")
-    else:
+    elif part == "full":
         ids = sorted(L)
         recs, raw = hybrid(WORKHORSE, L, ids, forms_all)
+        recs_rom, raw_rom = hybrid(WORKHORSE, L, ids, forms_rom)
         print(f"All {len(ids):,} new listings  [{time.time() - t0:.0f} s]")
         print(header)
         row("exact dictionary", exact, ids)
         row("fuzzy dictionary", fuzzy, ids)
+        row("romanised dictionary", rom, ids)
         row(f"dictionary + {WORKHORSE}", recs, ids, raw, WORKHORSE)
+        row(f"romanised + {WORKHORSE}", recs_rom, ids, raw_rom, WORKHORSE)
         by_group(fuzzy, L, ids, "fuzzy dictionary")
+        by_group(rom, L, ids, "romanised dictionary")
         by_group(recs, L, ids, f"dictionary + {WORKHORSE}")
-        u = usage(raw, WORKHORSE)
-        print(f"\ndictionary + {WORKHORSE}: {u['requests']:,} of {len(ids):,} listings sent to the model; "
-              f"{u['input']:,} input and {u['output']:,} output tokens (times: speed.py, measured with nothing else "
-              f"running)")
+        by_group(recs_rom, L, ids, f"romanised dictionary + {WORKHORSE}")
+        for label, r in ((f"dictionary + {WORKHORSE}", raw), (f"romanised dictionary + {WORKHORSE}", raw_rom)):
+            u = usage(r, WORKHORSE)
+            print(f"\n{label}: {u['requests']:,} of {len(ids):,} listings sent to the model; {u['input']:,} input and "
+                  f"{u['output']:,} output tokens; {llm.failures(r, [FALLBACK_SCHEMA] * len(r))} (times: speed.py, "
+                  f"measured with nothing else running)")
+    else:
+        H = heldout_listings(W)
+        ids = sorted(H)
+        print(f"The held-out spelling test: the {len(ids)} Hindi listings typed in Latin letters, written again the "
+              f"second way (for example {H[ids[0]]['text']!r}); no dictionary knows these spellings  "
+              f"[{time.time() - t0:.0f} s]")
+        L = H                                                    # row() and report() score against these
+        print(header)
+        row("exact dictionary", {i: exact_dictionary(H[i]) for i in ids}, ids)
+        row("fuzzy dictionary", {i: fuzzy_dictionary(H[i], forms_all) for i in ids}, ids)
+        row("romanised dictionary", {i: fuzzy_dictionary(H[i], forms_rom) for i in ids}, ids)
+        for name in (WORKHORSE, "Claude Sonnet 5.5"):
+            try:
+                recs, raw = hybrid(name, H, ids, forms_rom)
+            except SystemExit:
+                continue
+            row(f"romanised + {name}", recs, ids, raw, name)
+            print(f"    {name}: {llm.failures(raw, [FALLBACK_SCHEMA] * len(raw))}")
+        print("  (Hindi only, so the by-language view is this table; the hosted model is a reference on item data)")

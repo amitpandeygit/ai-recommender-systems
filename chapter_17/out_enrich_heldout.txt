@@ -1,0 +1,10 @@
+The held-out spelling test: the 236 Hindi listings typed in Latin letters, written again the second way (for example 'heyrastaail aaeelaainar naakhoon 2026'); no dictionary knows these spellings  [78 s]
+                                 category  precision  recall     F1  invented  requests  s/listing  USD/1,000
+  exact dictionary          86.0%      1.000   0.027  0.052      0.0%
+  fuzzy dictionary          88.1%      0.927   0.197  0.325      0.0%
+  romanised dictionary      98.3%      0.998   0.664  0.797      0.0%
+  romanised + Qwen3.5-4B    98.3%      0.965   0.869  0.914      0.0%       194
+    Qwen3.5-4B: 0 answers cut off, 0 not matching the schema
+  romanised + Claude Sonnet 5.5    99.2%      0.999   0.983  0.991      0.0%       194       1.18       0.82
+    Claude Sonnet 5.5: 0 answers cut off, 0 not matching the schema
+  (Hindi only, so the by-language view is this table; the hosted model is a reference on item data)

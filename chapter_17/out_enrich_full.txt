@@ -1,8 +1,10 @@
-All 2,369 new listings  [80 s]
+All 2,369 new listings  [106 s]
                                  category  precision  recall     F1  invented  requests  s/listing  USD/1,000
   exact dictionary          85.6%      0.999   0.776  0.873      0.0%
   fuzzy dictionary          97.6%      0.990   0.899  0.943      0.9%
+  romanised dictionary      98.4%      0.994   0.973  0.983      0.9%
   dictionary + Qwen3.5-4B    98.4%      0.981   0.958  0.970      2.3%       992
+  romanised + Qwen3.5-4B    98.5%      0.987   0.985  0.986      2.3%       836
 
 fuzzy dictionary: F1 of the concepts and category accuracy, by language and by fault
                          listings     F1  category
@@ -21,6 +23,23 @@ fuzzy dictionary: F1 of the concepts and category accuracy, by language and by f
   fault: typo                 929  0.921     98.6%
   fault: sales phrase         691  0.938     96.8%
 
+romanised dictionary: F1 of the concepts and category accuracy, by language and by fault
+                         listings     F1  category
+  English                     287  0.985     98.6%
+  Hindi                       455  0.985     98.7%
+  Portuguese                  396  0.985     97.7%
+  Spanish                     471  0.984     98.1%
+  Indonesian                  404  0.983     99.0%
+  Arabic                      356  0.978     98.3%
+  fault: none                 479  0.999    100.0%
+  fault: wrong category       341  0.984     91.2%
+  fault: says nothing         216  0.979     87.0%
+  fault: word dropped         320  0.984     98.8%
+  fault: English mixed        358  0.985     98.9%
+  fault: romanised Hindi      237  0.986     99.2%
+  fault: typo                 929  0.964     99.4%
+  fault: sales phrase         691  0.982     98.1%
+
 dictionary + Qwen3.5-4B: F1 of the concepts and category accuracy, by language and by fault
                          listings     F1  category
   English                     287  0.997     98.6%
@@ -38,4 +57,23 @@ dictionary + Qwen3.5-4B: F1 of the concepts and category accuracy, by language a
   fault: typo                 929  0.953     99.1%
   fault: sales phrase         691  0.955     98.4%
 
-dictionary + Qwen3.5-4B: 992 of 2,369 listings sent to the model; 3,240,342 input and 7,481 output tokens (times: speed.py, measured with nothing else running)
+romanised dictionary + Qwen3.5-4B: F1 of the concepts and category accuracy, by language and by fault
+                         listings     F1  category
+  English                     287  0.997     98.6%
+  Hindi                       455  0.985     98.7%
+  Portuguese                  396  0.988     98.0%
+  Spanish                     471  0.984     98.1%
+  Indonesian                  404  0.986     99.3%
+  Arabic                      356  0.978     98.3%
+  fault: none                 479  0.999    100.0%
+  fault: wrong category       341  0.985     91.2%
+  fault: says nothing         216  0.974     86.6%
+  fault: word dropped         320  0.983     99.1%
+  fault: English mixed        358  0.987     98.9%
+  fault: romanised Hindi      237  0.981     99.2%
+  fault: typo                 929  0.973     99.4%
+  fault: sales phrase         691  0.977     98.6%
+
+dictionary + Qwen3.5-4B: 992 of 2,369 listings sent to the model; 3,240,342 input and 7,481 output tokens; 0 answers cut off, 0 not matching the schema (times: speed.py, measured with nothing else running)
+
+romanised dictionary + Qwen3.5-4B: 836 of 2,369 listings sent to the model; 2,730,907 input and 5,344 output tokens; 0 answers cut off, 0 not matching the schema (times: speed.py, measured with nothing else running)

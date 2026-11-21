@@ -21,10 +21,17 @@ not list. The hosted reference model (Claude Sonnet 5.5) is reached through
 Anthropic's API, only for data that describes items, never users; its key is read from
 the ANTHROPIC_API_KEY environment variable and is never stored.
 
-Readers reproduce every number from the cache without running a model. To run the
-models again, put the GGUF files from fetch_models.py in chapter_17/models and set
-CH17_RUN=1 (CH17_RUN=1 with ANTHROPIC_API_KEY set also calls the hosted model).
+Readers reproduce every number from the cache without running a model (replay). To run
+the models, put the GGUF files from fetch_models.py in chapter_17/models; each file is
+checked against its SHA-256 before it is loaded. CH17_RUN=1 computes the answers that are
+missing, and also those whose cached answer came from another engine or build (the
+engine is stored with every answer); CH17_FRESH=1 with CH17_RUN=1 computes every answer
+again, best with CH17_CACHE pointing to another folder so that the archive stays as it
+is. ANTHROPIC_API_KEY must be set for the hosted model. Every answer is checked against
+its schema (valid), because a grammar binds only an answer that finishes, and the
+hosted model does not enforce counts or lengths.
 """
+import functools
 import hashlib
 import json
 import os
@@ -87,6 +94,8 @@ class _Local:
         path = MODEL_DIR / MODELS[name][1]
         if not path.exists():
             raise SystemExit(f"{path} is missing: run fetch_models.py (see llm.py)")
+        if _sha256(path) != FILES[name][2]:                      # the exact file, or nothing
+            raise SystemExit(f"{path} is not the file llm.FILES pins (SHA-256 differs): run fetch_models.py")
         default = llama_cpp.llama_model_default_params
 
         def params():                                            # weights read in place from the file, not
@@ -138,6 +147,14 @@ def _strict(schema):
     return [_strict(v) for v in schema] if isinstance(schema, list) else schema
 
 
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 24), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
 def _local(name):
     if name not in _loaded:
         _loaded.clear()                                          # one model in memory at a time
@@ -165,9 +182,63 @@ def _cache(task):
 _caches = {}
 
 
+def _task_cache(task):
+    """The task's cached answers, read from disk once per process. The cache is meant for
+    one writing process at a time (the chapter's runs); several writers would need a
+    shared store."""
+    if task not in _caches:
+        _caches[task] = _cache(task)
+    return _caches[task]
+
+
 def cached(name, task, system, user, schema, max_tokens=256):
     """The cached answer to this request, or None."""
-    return _caches.setdefault(task, _cache(task)).get(_key(name, system, user, schema, max_tokens))
+    return _task_cache(task).get(_key(name, system, user, schema, max_tokens))
+
+
+def _usable(rec, name):
+    """Whether a cached answer may be returned. Replaying (CH17_RUN unset) returns the
+    archived answer. With CH17_RUN=1, an answer from a local model is reused only if it was
+    computed by the same engine and build as now; with CH17_FRESH=1, never (set CH17_CACHE
+    to another folder to keep fresh answers apart from the archive)."""
+    if rec is None or os.environ.get("CH17_FRESH") == "1":
+        return False
+    if os.environ.get("CH17_RUN") == "1" and MODELS[name][0] == "llama.cpp":
+        return rec.get("engine") == engine_version(name)
+    return True
+
+
+def valid(answer, schema):
+    """Whether a parsed answer matches the request's schema: types, enums, required keys,
+    and the limits on counts and lengths. An answer cut off at max_tokens is None. The
+    hosted model's structured output does not enforce counts or lengths (see _strict), and
+    a grammar applies only to an answer that finishes, so every answer is checked here."""
+    if answer is None:
+        return False
+    t = schema.get("type")
+    if t == "object":
+        if not isinstance(answer, dict) or any(k not in answer for k in schema.get("required", [])):
+            return False
+        return all(valid(answer[k], sub) for k, sub in schema.get("properties", {}).items() if k in answer)
+    if t == "array":
+        if not isinstance(answer, list) or len(answer) > schema.get("maxItems", len(answer)) \
+                or len(answer) < schema.get("minItems", 0):
+            return False
+        return all(valid(x, schema["items"]) for x in answer) if "items" in schema else True
+    if t == "string":
+        return isinstance(answer, str) and len(answer) <= schema.get("maxLength", len(answer)) \
+            and ("enum" not in schema or answer in schema["enum"])
+    if t == "boolean":
+        return isinstance(answer, bool)
+    return True
+
+
+def failures(records, schemas):
+    """How many answers were cut off (no complete JSON) and how many do not match their
+    schema, in words for the scripts' reports."""
+    cut = sum(r["answer"] is None for r in records)
+    bad = sum(r["answer"] is not None and not valid(r["answer"], sc) for r, sc in zip(records, schemas))
+    return f"{cut} answers cut off, {bad} not matching the schema"
 
 
 def ask(name, task, system, user, schema, max_tokens=256):
@@ -175,8 +246,8 @@ def ask(name, task, system, user, schema, max_tokens=256):
     that matches the JSON schema out, read from the cache when the same request was
     answered before. Returns the cached record: the answer, the tokens and the seconds."""
     key = _key(name, system, user, schema, max_tokens)
-    cache = _caches.setdefault(task, _cache(task))
-    if key in cache:
+    cache = _task_cache(task)
+    if _usable(cache.get(key), name):
         return cache[key]
     if os.environ.get("CH17_RUN") != "1":
         raise SystemExit(f"{task}: an answer is not in llm_cache; set CH17_RUN=1 to run {name} (see llm.py)")
@@ -218,9 +289,9 @@ def ask_many(name, task, requests, max_tokens=256, every=50):
     (two processor cores and 7 GB on the book's machine)."""
     import subprocess
     import tempfile
-    cache = _caches.setdefault(task, _cache(task))
+    cache = _task_cache(task)
     keys = [_key(name, s, u, sc, max_tokens) for s, u, sc in requests]
-    todo = [r for r, k in zip(requests, keys) if k not in cache]
+    todo = [r for r, k in zip(requests, keys) if not _usable(cache.get(k), name)]
     if todo and os.environ.get("CH17_COLLECT"):                 # staged: hand the requests to staged.py
         with open(os.environ["CH17_COLLECT"], "w", encoding="utf-8") as f:
             json.dump({"name": name, "task": task, "max_tokens": max_tokens, "requests": todo}, f, ensure_ascii=False)
@@ -238,6 +309,7 @@ def ask_many(name, task, requests, max_tokens=256, every=50):
     return [cache[k] for k in keys]
 
 
+@functools.lru_cache(maxsize=None)
 def engine_version(name):
     if MODELS[name][0] == "api":
         import anthropic
