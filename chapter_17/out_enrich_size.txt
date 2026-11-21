@@ -1,0 +1,33 @@
+The size test: 600 listings, 100 in each language; the 9B model alone on 15, the first 5 of English, Hindi and Portuguese  [68 s]
+Model alone: the model reads every listing. Dictionary + model: the fuzzy dictionary reads it first, and only a listing with words it could not read goes to the model (Listing 17.4).
+
+On all 600: category accuracy; precision, recall and F1 of the concepts; invented: share of listings that say nothing for which a concept was made up; requests to the model; for the hosted model, seconds per listing and USD per 1,000 listings (local models' times: speed.py)
+                                 category  precision  recall     F1  invented  requests  s/listing  USD/1,000
+  exact dictionary          84.8%      0.999   0.777  0.874      0.0%
+  fuzzy dictionary          97.2%      0.989   0.910  0.948      0.0%
+  Qwen3.5-0.8B alone        93.3%      0.560   0.561  0.560     80.4%       600
+  dictionary + Qwen3.5-0.8B    97.0%      0.974   0.921  0.947      8.9%       261
+  Qwen3.5-2B alone          96.8%      0.753   0.691  0.721     33.9%       600
+  dictionary + Qwen3.5-2B    98.0%      0.976   0.929  0.952      0.0%       261
+  Qwen3.5-4B alone          93.0%      0.980   0.847  0.909      0.0%       600
+  dictionary + Qwen3.5-4B    98.3%      0.980   0.959  0.969      0.0%       261
+  Claude Sonnet 5.5 alone    98.3%      0.998   0.984  0.991      0.0%       600       1.43       1.06
+  dictionary + Claude Sonnet 5.5    98.3%      0.989   0.987  0.988      0.0%       261       0.58       0.41
+
+On the 15 the 9B model read: category accuracy; precision, recall and F1 of the concepts; invented: share of listings that say nothing for which a concept was made up; requests to the model; for the hosted model, seconds per listing and USD per 1,000 listings (local models' times: speed.py)
+                                 category  precision  recall     F1  invented  requests  s/listing  USD/1,000
+  exact dictionary          80.0%      0.980   0.828  0.897      0.0%
+  fuzzy dictionary          93.3%      0.982   0.966  0.974      0.0%
+  Qwen3.5-0.8B alone        80.0%      0.592   0.500  0.542     50.0%        15
+  dictionary + Qwen3.5-0.8B    93.3%      0.982   0.966  0.974      0.0%         5
+  Qwen3.5-2B alone          93.3%      0.811   0.741  0.775      0.0%        15
+  dictionary + Qwen3.5-2B    93.3%      0.950   0.983  0.966      0.0%         5
+  Qwen3.5-4B alone          86.7%      1.000   0.810  0.895      0.0%        15
+  dictionary + Qwen3.5-4B    93.3%      0.983   0.983  0.983      0.0%         5
+  Qwen3.5-9B alone          93.3%      1.000   0.914  0.955      0.0%        15
+  Claude Sonnet 5.5 alone    93.3%      1.000   1.000  1.000      0.0%        15       1.49       1.01
+  dictionary + Claude Sonnet 5.5    93.3%      0.983   0.983  0.983      0.0%         5       0.60       1.27
+
+Qwen3.5-9B, run with nothing else on the machine: a median of 255 s per listing, because its 5.68 GB file and its working memory do not fit in the 6 GB the job may use
+
+Models: Qwen3.5-0.8B (Qwen3.5-0.8B-Q4_K_M.gguf, sha256 bd258782e35f); Qwen3.5-2B (Qwen3.5-2B-Q4_K_M.gguf, sha256 aaf42c8b7c3c); Qwen3.5-4B (Qwen3.5-4B-Q4_K_M.gguf, sha256 00fe7986ff5f); Qwen3.5-9B (Qwen3.5-9B-Q4_K_M.gguf, sha256 03b74727a860); Claude Sonnet 5.5 (claude-sonnet-5-5). Engine: llama-cpp-python 0.3.37, 2 threads, x86_64, greedy decoding, the answer constrained by the JSON schema.

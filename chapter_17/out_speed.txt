@@ -1,0 +1,6 @@
+36 listings sent alone and 36 sent with the dictionary's findings; llama-cpp-python 0.3.37, 2 threads, x86_64; greedy decoding with the schema's grammar
+                  load s  first s  alone: median s  out tokens  with dictionary: median s  out tokens  requests
+  Qwen3.5-0.8B       0.6     25.5             4.44        24.4                       2.57        10.7    36  36
+  Qwen3.5-2B        44.2     42.0             6.24        23.9                       2.33         7.3    36  36
+  Qwen3.5-4B        12.8     98.3            10.95        22.1                       5.05         7.4    36  36
+  first: the first request alone, which also reads the shared instruction; median: the other requests, which restore the saved state and read only their own part (the first request with the dictionary's findings, which reads that instruction, is left out of its median)

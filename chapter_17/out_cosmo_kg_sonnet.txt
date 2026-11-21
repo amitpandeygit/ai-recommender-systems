@@ -1,0 +1,50 @@
+Environment: Python 3.13.18, NumPy 2.5.4, PyTorch 2.15.0, Linux x86_64, 2 CPUs
+
+occasions: 6,494 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Claude Sonnet 5.5 (claude-sonnet-5-5)) gave 'no common reason' for 190 (63.3%); the critic kept 65 of the other 110  [69 s]
+  pairs bought together in an occasion basket: 89; an intent kept for 32.6% of them and for 17.1% of the others
+  37 distinct kept phrases; 6 intent nodes of at least 3 phrases: new home setup (22); children's gift shopping (11); decorating child's room (10); travel essentials (7); personal makeover (7); summer outdoor play (5)
+    e.g. [home: lamp, mirror, blanket, best] + [skincare: sunscreen, face cream, face wash, review] -> 'home and self-care' (rejected by the critic)
+    e.g. [phone gear: speaker, smartwatch, phone stand, 2026] + [home: curtain, rug, pillow, best] -> 'home decor refresh' (rejected by the critic)
+    e.g. [home: mirror, shelf, rug, top, blender] + [skincare: face mask, soap, toner, easy, cartoon] -> 'home spa day' (rejected by the critic)
+    e.g. [skincare: face wash, scrub, serum, cheap, mascara] + [home: pillow, shelf, blanket, easy] -> 'no common reason' (rejected by the critic)
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: lamp, rug, pillow, quick] -> 'kids room makeover'
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: pillow, shelf, blanket, easy] -> 'kids room setup'
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: lamp, vase, chair, 2026] -> 'no common reason' (rejected by the critic)
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [fashion: shirt, scarf, jeans, best] -> 'kids gift shopping'
+  concepts tagged: 58 of 60; products linked to an intent: 1,534 of 1,534; launched: 150 of 150
+  each intent node's concepts, and the planted occasion they overlap most (Jaccard of concept sets):
+    new home setup              adapter, blanket, blender, cable, chair, cooking pot, curtain, frying pan, kettle, knife, lamp, mirror, mug, oven, phone stand, pillow, plate, rug, shelf, soap, speaker, spoon, vase, wall clock  ->  new home 0.33
+    children's gift shopping    ball, building blocks, crayons, doll, dress, kite, marbles, puzzle, slime, teddy bear, yoyo  ->  child's birthday 0.50
+    decorating child's room     blanket, building blocks, curtain, doll, lamp, rug, shelf, teddy bear, wall clock  ->  new home 0.42
+    travel essentials           adapter, body lotion, bottle, cable, car mount, earbuds, face cream, face mask, face wash, handbag, hat, jacket, moisturizer, phone case, phone stand, pillow, power bank, sandals, scarf, shoes, smartwatch, soap, speaker, sunscreen  ->  road trip 0.29
+    personal makeover           body lotion, dress, face cream, face mask, face wash, handbag, mirror, moisturizer, scarf, scrub, serum, shirt, shoes, skirt, smartwatch, toner  ->  gym 0.16
+    summer outdoor play         ball, bottle, hat, kite, marbles, sandals, slime, sunscreen, yoyo  ->  beach holiday 0.60
+  Launch test, 1,246 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10)  [666 s]
+    LightGCN + KG (Chapter 10)           0.0435     0.0888   
+    + LLM intent nodes                   0.0411     0.0858   -0.0024 (0.0027) [-0.0078, +0.0026]
+    + planted occasions (reference)      0.0431     0.0891   -0.0004 (0.0026) [-0.0058, +0.0044]
+
+control: 5,163 cross-category pairs bought together in at least 2 orders before day 23; 300 drawn. The model (Claude Sonnet 5.5 (claude-sonnet-5-5)) gave 'no common reason' for 200 (66.7%); the critic kept 61 of the other 100  [666 s]
+  38 distinct kept phrases; 6 intent nodes of at least 3 phrases: furnishing new home (17); decorating child's room (16); summer vacation travel (10); family gift shopping (7); home self-care (5); personal appearance refresh (4)
+    e.g. [home: lamp, mirror, blanket, best] + [kitchen: bottle, mug, blender, quick] -> 'home decorating' (rejected by the critic)
+    e.g. [phone gear: speaker, smartwatch, phone stand, 2026] + [kitchen: oven, knife, blender, top, meme] -> 'no common reason' (rejected by the critic)
+    e.g. [toys: ball, crayons, marbles, new] + [skincare: body lotion, face cream, serum, easy] -> 'no common reason' (rejected by the critic)
+    e.g. [phone gear: earbuds, car mount, adapter, new] + [fashion: jacket, jeans, dress, easy, marbles] -> 'no common reason' (rejected by the critic)
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: rug, blanket, lamp, top] -> 'kids playroom setup'
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: pillow, shelf, curtain, cheap] -> 'no common reason' (rejected by the critic)
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: blanket, rug, curtain, best, flood] -> 'no common reason' (rejected by the critic)
+    e.g. [toys: ball, yoyo, crayons, easy, basketball] + [home: rug, blanket, pillow, top] -> "children's playroom setup"
+  concepts tagged: 60 of 60; products linked to an intent: 1,534 of 1,534; launched: 150 of 150
+  each intent node's concepts, and the planted occasion they overlap most (Jaccard of concept sets):
+    furnishing new home         blanket, blender, cable, chair, cooking pot, curtain, frying pan, kettle, knife, lamp, mirror, mug, oven, phone stand, pillow, plate, rug, shelf, speaker, spoon, vase, wall clock  ->  new home 0.36
+    decorating child's room     ball, building blocks, chair, crayons, curtain, doll, lamp, marbles, rug, shelf, slime, teddy bear, wall clock  ->  new home 0.40
+    summer vacation travel      adapter, bottle, car mount, dress, earbuds, hat, kite, power bank, sandals, screen protector, shoes, skirt, sunscreen  ->  beach holiday 0.33
+    family gift shopping        ball, blanket, building blocks, cooking pot, crayons, doll, earbuds, frying pan, handbag, jacket, jeans, kettle, kite, marbles, mug, phone case, phone stand, plate, power bank, puzzle, scarf, shirt, slime, smartwatch, soap, speaker, teddy bear, vase, yoyo  ->  child's birthday 0.24
+    home self-care              blender, body lotion, bottle, face cream, face mask, face wash, moisturizer, pillow, puzzle, scrub, serum, soap, sunscreen, toner  ->  gym 0.18
+    personal appearance refresh body lotion, dress, face cream, face mask, face wash, handbag, hat, jacket, jeans, mirror, moisturizer, phone case, sandals, scarf, scrub, serum, shirt, shoes, skirt, smartwatch, toner  ->  winter 0.17
+  Launch test, 978 users who bought a launched product in days 23 to 30 (NDCG@10, recall@10; against: paired difference in NDCG@10)  [984 s]
+    LightGCN + KG (Chapter 10)           0.0389     0.0796   
+    + LLM intent nodes                   0.0355     0.0738   -0.0034 (0.0029) [-0.0089, +0.0022]
+    + planted occasions (reference)      0.0368     0.0752   -0.0021 (0.0029) [-0.0077, +0.0037]
+
+Model: Claude Sonnet 5.5 (claude-sonnet-5-5); anthropic 2.11.0; greedy decoding, answers constrained by JSON schemas. LightGCN + KG: 3 layers, 40 epochs, means over seeds 0, 1 and 2.  [986 s]

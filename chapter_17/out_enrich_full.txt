@@ -1,0 +1,41 @@
+All 2,369 new listings  [80 s]
+                                 category  precision  recall     F1  invented  requests  s/listing  USD/1,000
+  exact dictionary          85.6%      0.999   0.776  0.873      0.0%
+  fuzzy dictionary          97.6%      0.990   0.899  0.943      0.9%
+  dictionary + Qwen3.5-4B    98.4%      0.981   0.958  0.970      2.3%       992
+
+fuzzy dictionary: F1 of the concepts and category accuracy, by language and by fault
+                         listings     F1  category
+  English                     287  0.984     98.6%
+  Hindi                       455  0.731     94.3%
+  Portuguese                  396  0.985     97.7%
+  Spanish                     471  0.984     98.3%
+  Indonesian                  404  0.984     99.0%
+  Arabic                      356  0.978     98.3%
+  fault: none                 479  0.999    100.0%
+  fault: wrong category       341  0.948     87.4%
+  fault: says nothing         216  0.947     87.0%
+  fault: word dropped         320  0.956     97.8%
+  fault: English mixed        358  0.953     99.2%
+  fault: romanised Hindi      237  0.382     90.7%
+  fault: typo                 929  0.921     98.6%
+  fault: sales phrase         691  0.938     96.8%
+
+dictionary + Qwen3.5-4B: F1 of the concepts and category accuracy, by language and by fault
+                         listings     F1  category
+  English                     287  0.997     98.6%
+  Hindi                       455  0.896     98.0%
+  Portuguese                  396  0.988     98.0%
+  Spanish                     471  0.984     98.3%
+  Indonesian                  404  0.986     99.3%
+  Arabic                      356  0.978     98.3%
+  fault: none                 479  0.999    100.0%
+  fault: wrong category       341  0.973     90.9%
+  fault: says nothing         216  0.962     86.6%
+  fault: word dropped         320  0.972     99.1%
+  fault: English mixed        358  0.975     99.2%
+  fault: romanised Hindi      237  0.801     97.9%
+  fault: typo                 929  0.953     99.1%
+  fault: sales phrase         691  0.955     98.4%
+
+dictionary + Qwen3.5-4B: 992 of 2,369 listings sent to the model; 3,240,342 input and 7,481 output tokens (times: speed.py, measured with nothing else running)

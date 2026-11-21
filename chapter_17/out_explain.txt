@@ -1,0 +1,57 @@
+
+reasons: 300 texts, 50 per language. The rules' verdict: share that pass every rule, and the share with each problem  [55 s]
+                                             pass  length  script  unfaithful  claim
+  template                                 100.0%    0.0%    0.0%        0.0%   0.0%
+  Qwen3.5-4B, one attempt                   96.3%    3.7%    0.0%        0.0%   0.0%
+  loop, rules                               97.3%    2.7%    0.0%        0.0%   0.0%
+  loop, critic (Qwen3.5-4B)                 96.0%    4.0%    0.0%        0.0%   0.0%
+  loop, both (Qwen3.5-4B)                   97.0%    3.0%    0.0%        0.0%   0.0%
+  by language, share passing every rule:
+                                               English       Hindi  Portuguese     Spanish  Indonesian      Arabic
+  template                                      100.0%      100.0%      100.0%      100.0%      100.0%      100.0%
+  Qwen3.5-4B, one attempt                        90.0%      100.0%      100.0%       96.0%       94.0%       98.0%
+  loop, rules                                    92.0%      100.0%      100.0%      100.0%       94.0%       98.0%
+  loop, critic (Qwen3.5-4B)                      88.0%      100.0%      100.0%       96.0%       94.0%       98.0%
+  loop, both (Qwen3.5-4B)                        90.0%      100.0%      100.0%      100.0%       94.0%       98.0%
+  the loops: accepted by their evaluator, by round; requests per 1,000 texts; processor seconds per text on two cores
+  loop, rules                              round 1 96.3%, round 2 1.0%, round 3 0.0%, never 2.7%; 1,063 requests, 9.75 s
+  loop, critic (Qwen3.5-4B)                round 1 88.3%, round 2 0.3%, round 3 0.0%, never 11.3%; 2,460 requests, 20.75 s
+  loop, both (Qwen3.5-4B)                  round 1 86.0%, round 2 1.3%, round 3 0.0%, never 12.7%; 2,533 requests, 21.48 s
+    e.g. (English) one attempt 'Since you liked rice, breakfast, and grill.' []; after the rules loop 'Since you liked rice, breakfast, and grill.'
+    e.g. (Hindi) one attempt 'यह वीडियो मस्कारा और फाउंडेशन पर है।' []; after the rules loop 'यह वीडियो मस्कारा और फाउंडेशन पर है।'
+    e.g. (Portuguese) one attempt 'Mais vídeos sobre concertos e piano.' []; after the rules loop 'Mais vídeos sobre concertos e piano.'
+    e.g. (Spanish) one attempt 'Porque te interesó la protesta y la ciencia.' []; after the rules loop 'Porque te interesó la protesta y la ciencia.'
+    e.g. (Indonesian) one attempt 'Video ini juga menampilkan pantai, gunung, dan kota.' []; after the rules loop 'Video ini juga menampilkan pantai, gunung, dan kota.'
+    e.g. (Arabic) one attempt 'هذا الفيديو عن كرة القدم والهدف واللياقة كما شاهدته سابقاً.' []; after the rules loop 'هذا الفيديو عن كرة القدم والهدف واللياقة كما شاهدته سابقاً.'
+  the critics against the rules, on the one-attempt texts
+  Qwen3.5-4B              300 texts, the rules fail  11; the critic missed   7 of them and raised  31 false alarms; agreement 87.3%; 7.46 s per text
+
+headlines: 300 texts, 50 per language. The rules' verdict: share that pass every rule, and the share with each problem  [57 s]
+                                             pass  length  script  unfaithful  claim
+  template                                 100.0%    0.0%    0.0%        0.0%   0.0%
+  Qwen3.5-4B, one attempt                   73.3%   26.0%    0.0%        2.7%   0.0%
+  loop, rules                               85.7%   14.0%    0.0%        0.7%   0.0%
+  loop, critic (Qwen3.5-4B)                 74.3%   25.0%    0.0%        2.7%   0.0%
+  loop, both (Qwen3.5-4B)                   85.3%   14.3%    0.0%        0.7%   0.0%
+  by language, share passing every rule:
+                                               English       Hindi  Portuguese     Spanish  Indonesian      Arabic
+  template                                      100.0%      100.0%      100.0%      100.0%      100.0%      100.0%
+  Qwen3.5-4B, one attempt                        94.0%       88.0%       40.0%       42.0%       76.0%      100.0%
+  loop, rules                                    94.0%       98.0%       62.0%       74.0%       86.0%      100.0%
+  loop, critic (Qwen3.5-4B)                      94.0%       90.0%       40.0%       42.0%       80.0%      100.0%
+  loop, both (Qwen3.5-4B)                        94.0%       96.0%       62.0%       74.0%       86.0%      100.0%
+  the loops: accepted by their evaluator, by round; requests per 1,000 texts; processor seconds per text on two cores
+  loop, rules                              round 1 73.3%, round 2 12.0%, round 3 0.3%, never 14.3%; 1,413 requests, 11.64 s
+  loop, critic (Qwen3.5-4B)                round 1 94.3%, round 2 2.0%, round 3 0.0%, never 3.7%; 2,187 requests, 16.28 s
+  loop, both (Qwen3.5-4B)                  round 1 71.0%, round 2 12.3%, round 3 0.3%, never 16.3%; 2,913 requests, 22.01 s
+    e.g. (English) one attempt 'Knife, plate, mug for your kitchen.' []; after the rules loop 'Knife, plate, mug for your kitchen.'
+    e.g. (Hindi) one attempt 'चाकू, प्लेट और मग का संगम' []; after the rules loop 'चाकू, प्लेट और मग का संगम'
+    e.g. (Portuguese) one attempt 'Faca, prato e caneca para sua cozinha.' []; after the rules loop 'Faca, prato e caneca para sua cozinha.'
+    e.g. (Spanish) one attempt 'Cuchillo, plato y taza para tu cocina' []; after the rules loop 'Cuchillo, plato y taza para tu cocina'
+    e.g. (Indonesian) one attempt 'Pisau, piring, mug untuk dapur Anda.' []; after the rules loop 'Pisau, piring, mug untuk dapur Anda.'
+    e.g. (Arabic) one attempt 'سكين وطبق وكوب في مطبخك' []; after the rules loop 'سكين وطبق وكوب في مطبخك'
+  the critics against the rules, on the one-attempt texts
+  Qwen3.5-4B              300 texts, the rules fail  80; the critic missed  70 of them and raised   7 false alarms; agreement 74.3%; 6.78 s per text
+  Claude Sonnet 5.5       300 texts, the rules fail  80; the critic missed  34 of them and raised   6 false alarms; agreement 86.7%; 1.48 s per text, USD 1.20 per 1,000
+
+[59 s]
